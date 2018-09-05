@@ -5,7 +5,7 @@ import numpy as np
 import psutil
 
 import arduino
-import cartGlobal
+import config
 import cartControl
 
 CANV_WIDTH = 300
@@ -20,8 +20,8 @@ todo: pass these values from cartControl to the Arduino on startup
 
 LINE_SCALE_SHORT = 2.0
 LINE_SCALE_LONG = 1.5
-SHORT_ARC_BOX = (cartGlobal.SHORT_RANGE_MAX + cartGlobal.SHORT_RANGE_MIN) / 2 * LINE_SCALE_SHORT
-LONG_ARC_BOX = (cartGlobal.LONG_RANGE_MAX + cartGlobal.LONG_RANGE_MIN) / 2 * LINE_SCALE_LONG
+SHORT_ARC_BOX = (config.SHORT_RANGE_MAX + config.SHORT_RANGE_MIN) / 2 * LINE_SCALE_SHORT
+LONG_ARC_BOX = (config.LONG_RANGE_MAX + config.LONG_RANGE_MIN) / 2 * LINE_SCALE_LONG
 
 # use named tupels to make the base positions available
 # e.g.  reference by: servos[0].id
@@ -35,13 +35,13 @@ sensors.append(location(id=0, x=X, y=Y,
                         x1=X - SHORT_ARC_BOX, y1=Y - SHORT_ARC_BOX,
                         x2=X + SHORT_ARC_BOX, y2=Y + SHORT_ARC_BOX,
                         arcFrom=0, arcLength=180,
-                        arcWidth=(cartGlobal.SHORT_RANGE_MAX - cartGlobal.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
+                        arcWidth=(config.SHORT_RANGE_MAX - config.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
 Y = CANV_HEIGHT / 4 - 40
 sensors.append(location(id=1, x=X, y=Y,
                         x1=X - LONG_ARC_BOX, y1=Y - LONG_ARC_BOX,
                         x2=X + LONG_ARC_BOX, y2=Y + LONG_ARC_BOX,
                         arcFrom=0, arcLength=180,
-                        arcWidth=(cartGlobal.LONG_RANGE_MAX - cartGlobal.LONG_RANGE_MIN) * LINE_SCALE_LONG))
+                        arcWidth=(config.LONG_RANGE_MAX - config.LONG_RANGE_MIN) * LINE_SCALE_LONG))
 
 # front right
 X = CANV_WIDTH / 4 * 3
@@ -50,13 +50,13 @@ sensors.append(location(id=2, x=X, y=Y,
                         x1=X - SHORT_ARC_BOX, y1=Y - SHORT_ARC_BOX,
                         x2=X + SHORT_ARC_BOX, y2=Y + SHORT_ARC_BOX,
                         arcFrom=0, arcLength=180,
-                        arcWidth=(cartGlobal.SHORT_RANGE_MAX - cartGlobal.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
+                        arcWidth=(config.SHORT_RANGE_MAX - config.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
 Y = CANV_HEIGHT / 4 - 40
 sensors.append(location(id=3, x=X, y=Y,
                         x1=X - LONG_ARC_BOX, y1=Y - LONG_ARC_BOX,
                         x2=X + LONG_ARC_BOX, y2=Y + LONG_ARC_BOX,
                         arcFrom=0, arcLength=180,
-                        arcWidth=(cartGlobal.LONG_RANGE_MAX - cartGlobal.LONG_RANGE_MIN) * LINE_SCALE_LONG))
+                        arcWidth=(config.LONG_RANGE_MAX - config.LONG_RANGE_MIN) * LINE_SCALE_LONG))
 
 # left
 X = CANV_WIDTH / 4
@@ -65,7 +65,7 @@ sensors.append(location(id=4, x=X, y=Y,
                         x1=X - SHORT_ARC_BOX, y1=Y - SHORT_ARC_BOX,
                         x2=X + SHORT_ARC_BOX, y2=Y + SHORT_ARC_BOX,
                         arcFrom=90, arcLength=180,
-                        arcWidth=(cartGlobal.SHORT_RANGE_MAX - cartGlobal.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
+                        arcWidth=(config.SHORT_RANGE_MAX - config.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
 
 # right
 X = CANV_WIDTH / 4 * 3
@@ -74,7 +74,7 @@ sensors.append(location(id=5, x=X, y=Y,
                         x1=X - SHORT_ARC_BOX, y1=Y - SHORT_ARC_BOX,
                         x2=X + SHORT_ARC_BOX, y2=Y + SHORT_ARC_BOX,
                         arcFrom=270, arcLength=180,
-                        arcWidth=(cartGlobal.SHORT_RANGE_MAX - cartGlobal.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
+                        arcWidth=(config.SHORT_RANGE_MAX - config.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
 
 # back left
 X = CANV_WIDTH / 4
@@ -83,13 +83,13 @@ sensors.append(location(id=6, x=X, y=Y,
                         x1=X - SHORT_ARC_BOX, y1=Y - SHORT_ARC_BOX,
                         x2=X + SHORT_ARC_BOX, y2=Y + SHORT_ARC_BOX,
                         arcFrom=180, arcLength=180,
-                        arcWidth=(cartGlobal.SHORT_RANGE_MAX - cartGlobal.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
+                        arcWidth=(config.SHORT_RANGE_MAX - config.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
 Y = CANV_HEIGHT / 4 * 3 + 40
 sensors.append(location(id=7, x=X, y=Y,
                         x1=X - LONG_ARC_BOX, y1=Y - LONG_ARC_BOX,
                         x2=X + LONG_ARC_BOX, y2=Y + LONG_ARC_BOX,
                         arcFrom=180, arcLength=180,
-                        arcWidth=(cartGlobal.LONG_RANGE_MAX - cartGlobal.LONG_RANGE_MIN) * LINE_SCALE_LONG))
+                        arcWidth=(config.LONG_RANGE_MAX - config.LONG_RANGE_MIN) * LINE_SCALE_LONG))
 
 # back right
 X = CANV_WIDTH / 4 * 3
@@ -98,14 +98,14 @@ sensors.append(location(id=8, x=X, y=Y,
                         x1=X - SHORT_ARC_BOX, y1=Y - SHORT_ARC_BOX,
                         x2=X + SHORT_ARC_BOX, y2=Y + SHORT_ARC_BOX,
                         arcFrom=180, arcLength=180,
-                        arcWidth=(cartGlobal.SHORT_RANGE_MAX - cartGlobal.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
+                        arcWidth=(config.SHORT_RANGE_MAX - config.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
 
 Y = CANV_HEIGHT / 4 * 3 + 40
 sensors.append(location(id=9, x=X, y=Y,
                         x1=X - LONG_ARC_BOX, y1=Y - LONG_ARC_BOX,
                         x2=X + LONG_ARC_BOX, y2=Y + LONG_ARC_BOX,
                         arcFrom=180, arcLength=180,
-                        arcWidth=(cartGlobal.LONG_RANGE_MAX - cartGlobal.LONG_RANGE_MIN) * LINE_SCALE_LONG))
+                        arcWidth=(config.LONG_RANGE_MAX - config.LONG_RANGE_MIN) * LINE_SCALE_LONG))
 
 # global variables
 gui = None
@@ -264,7 +264,7 @@ class manualControl:
         self.btnStop = tk.Button(frame, text="STOP CART", state="normal", command=self.stopCart, bg="red", fg="white")
         self.btnStop.grid(row=200, column=0, columnspan=2, pady=0)
 
-        if cartGlobal.arduinoStatus == 0:
+        if config.arduinoStatus == 0:
             self.startArduino()
 
     def showNewDistances(self):
@@ -309,12 +309,12 @@ class manualControl:
 
             if s.get('range') == 'long':
                 lengthFactor = LINE_SCALE_LONG
-                minRange = cartGlobal.LONG_RANGE_MIN
-                maxRange = cartGlobal.LONG_RANGE_MAX
+                minRange = config.LONG_RANGE_MIN
+                maxRange = config.LONG_RANGE_MAX
             else:
                 lengthFactor = LINE_SCALE_SHORT
-                minRange = cartGlobal.SHORT_RANGE_MIN
-                maxRange = cartGlobal.SHORT_RANGE_MAX
+                minRange = config.SHORT_RANGE_MIN
+                maxRange = config.SHORT_RANGE_MAX
 
             for k in range(cartControl.NUM_MEASUREMENTS_PER_SCAN):
 
@@ -353,7 +353,7 @@ class manualControl:
                     self.canvas.create_line(sensor.x, sensor.y, sensor.x + xOffset, sensor.y + yOffset, fill=col,
                                             width=lineWidth)
                 except:
-                    cartGlobal.log("ERROR: sensor.x,.y: " + str(sensor.x) + ", " + str(sensor.y))
+                    config.log("ERROR: sensor.x,.y: " + str(sensor.x) + ", " + str(sensor.y))
 
     def selectedDirection(self, value):
         self.direction = self.choices.index(value)
@@ -363,7 +363,7 @@ class manualControl:
 
     def startArduino(self):
 
-        cartGlobal.log("try to open serial connection to arduino on cart (COM5)")
+        config.log("try to open serial connection to arduino on cart (COM5)")
         arduino.initSerial("COM5")
         self.lblInfo.configure(text="arduino connected, waiting for cart ready message", bg="white smoke", fg="orange")
         self.btnArduino.configure(state="disabled")
@@ -377,7 +377,7 @@ class manualControl:
         '''
         # cartGlobal.log("checkArcuinoReady")
 
-        if cartGlobal.arduinoStatus == 1:
+        if config.arduinoStatus == 1:
             self.lblInfo.configure(text="cart ready", bg="lawn green", fg="black")
             self.btnRotate.configure(state="normal")
             self.btnMove.configure(state="normal")
@@ -391,7 +391,7 @@ class manualControl:
     def navigateTo(self):
         start = time.time()
         # PathFinder.analyze((int(self.sbX.get()),int(self.sbY.get())))
-        cartGlobal.log(f"analyzed in: {time.time() - start} seconds")
+        config.log(f"analyzed in: {time.time() - start} seconds")
         self.w.update_idletasks()
 
     def heartBeat(self):
@@ -407,15 +407,15 @@ class manualControl:
         arduino.sendHeartbeat()
 
         self.lblRotationCurrentValue.configure(
-            text=f"{cartGlobal.getOrientation()} / {cartGlobal._cartPositionX} / {cartGlobal._cartPositionY}")
+            text=f"{config.getOrientation()} / {config._cartPositionX} / {config._cartPositionY}")
 
         # check for updating new sensor data in gui
         self.showNewDistances()
 
         # update battery level every x seconds
-        if time.time() - cartGlobal.getLastBatteryCheckTime() > 5:
-            cartGlobal.updateBatteryStatus()
-            battery = cartGlobal.getBatteryStatus()
+        if time.time() - config.getLastBatteryCheckTime() > 5:
+            config.updateBatteryStatus()
+            battery = config.getBatteryStatus()
             plugged = battery.power_plugged
             if not plugged:
                 plugged = "on battery"
@@ -423,7 +423,7 @@ class manualControl:
                 plugged = "docked"
             batteryInfo = f", power: {plugged}, percent: {battery.percent:.0f}"
             self.lblInfo.configure(text="cart ready" + batteryInfo, bg="lawn green", fg="black")
-            cartGlobal.setLastBatteryCheckTime(time.time())
+            config.setLastBatteryCheckTime(time.time())
 
         self.w.update_idletasks()
         self.w.after(500, self.heartBeat)  # heart beat loop
@@ -432,7 +432,7 @@ class manualControl:
 
         arduino.sendStopCommand("manual request")
         arduino.getCartOrientation()
-        self.lblRotationCurrentValue.configure(text=str(cartGlobal.getOrientation()))
+        self.lblRotationCurrentValue.configure(text=str(config.getOrientation()))
         self.lblCommandValue.configure(text="Stop")
         self.w.update_idletasks()
 
@@ -440,7 +440,7 @@ class manualControl:
 
         cartSpeed = int(self.sbSpeed.get())
         distance = int(self.sbDist.get())
-        cartGlobal.log(f"moveCart, speed: {cartSpeed}, distance: {distance}")
+        config.log(f"moveCart, speed: {cartSpeed}, distance: {distance}")
         arduino.sendMoveCommand(self.direction, cartSpeed, distance)
         self.lblCommandValue.configure(text="Move")
         # self.lblMove.configure(text=str(speed))
@@ -457,18 +457,18 @@ class manualControl:
         relAngle = int(self.sbRotation.get())
 
         self.lblCommandValue.configure(text="Rotate")
-        targetOrientation = (cartGlobal.getOrientation() + relAngle) % 360
+        targetOrientation = (config.getOrientation() + relAngle) % 360
         self.lblRotationTargetValue.configure(text=str(targetOrientation))
         arduino.sendRotateCommand(relAngle, 150)
         self.w.update_idletasks()
 
     def updateDistanceSensorObstacle(self, distance, sensorID):
-        info = f"{distance}, {cartGlobal.getSensorName(sensorID)}"
+        info = f"{distance}, {config.getSensorName(sensorID)}"
         self.lblDistanceObstacleValue.configure(text=info)
         self.w.update_idletasks()
 
     def updateDistanceSensorAbyss(self, distance, sensorID):
-        info = f"{distance}, {cartGlobal.getSensorName(sensorID)}"
+        info = f"{distance}, {config.getSensorName(sensorID)}"
         self.lblDistanceAbyssValue.configure(text=info)
         self.w.update_idletasks()
 

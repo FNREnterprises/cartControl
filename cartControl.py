@@ -10,7 +10,7 @@ import win32gui  # part of pywin32
 import gui
 import arduino
 
-import cartGlobal
+import config
 
 CART_PORT = 20003
 
@@ -74,7 +74,7 @@ distanceList = np.zeros((NUM_DISTANCE_SENSORS, NUM_MEASUREMENTS_PER_SCAN))
 
 
 def cartInit():
-    cartGlobal.setMovementBlocked(False)
+    config.setMovementBlocked(False)
 
     # start cart control gui and initialization
     guiThread = threading.Thread(target=gui.startGui, args={})
@@ -100,14 +100,14 @@ def cartInit():
     # wait for cart startup finished
     print("cart - wait for cart to startup ...")
     timeout = time.time() + 10
-    while cartGlobal.arduinoStatus == 0 or time.time() < timeout:
+    while config.arduinoStatus == 0 or time.time() < timeout:
         time.sleep(1)
 
-    if cartGlobal.arduinoStatus == 0:
+    if config.arduinoStatus == 0:
         print("cart - timeout in startup, terminating")
         raise SystemExit()
 
-    cartGlobal.loadCartLocation()
+    config.loadCartLocation()
 
 
 def updateDistances(Values):
@@ -142,7 +142,7 @@ class cartCommands(rpyc.Service):
         print("EOF Error in cartControl, try to restart the task")
 
         # arduino.ser.close()
-        cartGlobal.navManager.close()
+        config.navManager.close()
         # task = sys.executable
         # os.execl(task, task, * sys.argv)
 
@@ -150,35 +150,35 @@ class cartCommands(rpyc.Service):
         '''
         a first call from navManager
         '''
-        if not cartGlobal.standAloneMode:
+        if not config.standAloneMode:
             try:
-                cartGlobal.navManager = rpyc.connect(logIP, logPort)
-                cartGlobal.navManager.root.connectionStatus("cart", True)
-                cartGlobal.log("logger connection established")
+                config.navManager = rpyc.connect(logIP, logPort)
+                config.navManager.root.connectionStatus("cart", True)
+                config.log("logger connection established")
 
             except:
                 print("cart - could not establish connection to logger")
                 raise SystemExit()
 
-        if not cartGlobal.standAloneMode:
-            cartGlobal.navManager.root.processStatus("cart", True)
+        if not config.standAloneMode:
+            config.navManager.root.processStatus("cart", True)
 
     def exposed_rotateRelative(self, angle, speed):
         if abs(angle) > 0:
-            cartGlobal.log(f"exposed_rotateRelative, angle: {angle:.1f}")
+            config.log(f"exposed_rotateRelative, angle: {angle:.1f}")
             arduino.sendRotateCommand(int(angle), int(speed))
-            gui.controller.updateTargetRotation(cartGlobal.getOrientation() + int(angle))
+            gui.controller.updateTargetRotation(config.getOrientation() + int(angle))
 
     def exposed_move(self, direction, speed, distance=10):
-        cartGlobal.log(f"exposed_move, direction: {direction}, speed: {speed}, distance: {distance}")
+        config.log(f"exposed_move, direction: {direction}, speed: {speed}, distance: {distance}")
         arduino.sendMoveCommand(direction, speed, distance)
 
     def exposed_stop(self):
-        cartGlobal.log("exposed_stop")
+        config.log("exposed_stop")
         gui.controller.stopCart()
 
     def exposed_requestCartOrientation(self):
-        return cartGlobal.getOrientation()
+        return config.getOrientation()
 
     def exposed_heartBeat(self):
         global lastMessage
@@ -186,13 +186,13 @@ class cartCommands(rpyc.Service):
         # watchdog for incoming commands from navManager
         # stop cart if we do not get regular messages
         currTime = int(round(time.time() * 1000))
-        cartGlobal.log(currTime - lastMessage)
+        config.log(currTime - lastMessage)
         if currTime - lastMessage > TIMEOUT:
-            if cartGlobal.isCartMoving:
+            if config.isCartMoving:
                 arduino.sendStopCommand("missing heartbeat from navManager")
         else:
             arduino.sendHeartbeat()
-            cartGlobal.log("arduino Heartbeat sent")
+            config.log("arduino Heartbeat sent")
 
         lastMessage = int(round(time.time() * 1000))
 
@@ -200,17 +200,17 @@ class cartCommands(rpyc.Service):
         return obstacleInfo
 
     def exposed_getCartInfo(self):
-        posX, posY = cartGlobal.getCartPosition()
-        return cartGlobal.getOrientation(), posX, posY, cartGlobal.isCartMoving(), cartGlobal.isCartRotating()
+        posX, posY = config.getCartPosition()
+        return config.getOrientation(), posX, posY, config.isCartMoving(), config.isCartRotating()
 
     def exposed_getBatteryStatus(self):
-        return cartGlobal.getBatteryStatus()
+        return config.getBatteryStatus()
 
     def exposed_isCartMoving(self):
-        return cartGlobal.isCartMoving()
+        return config.isCartMoving()
 
     def exposed_isCartRotating(self):
-        return cartGlobal.isCartRotating()
+        return config.isCartRotating()
 
 
 if __name__ == '__main__':
@@ -223,8 +223,8 @@ if __name__ == '__main__':
     print("startup cart")
     cartInit()
 
-    if not cartGlobal.standAloneMode:
-        cartGlobal.log("wait for messages from navManager ...")
+    if not config.standAloneMode:
+        config.log("wait for messages from navManager ...")
         t = ThreadedServer(cartCommands, port=CART_PORT)
         t.start()
 
