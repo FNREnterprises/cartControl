@@ -1,17 +1,22 @@
+
 import time
 import sys
 import os
-import io
 import numpy as np
 import psutil
 import cv2
 import json
 from enum import Enum
 
+#import arduino
+
 ##################################################################
 # cartControl can run as slave of navManager or in standalone mode
 ##################################################################
 standAloneMode = False  # False -> slave mode,  True -> standalone mode
+
+MY_IP = "192.168.0.17"
+MY_XMLRPC_PORT = 30001
 
 # configuration values for cart arduino infrared distance limits
 SHORT_RANGE_MIN = 6
@@ -27,6 +32,9 @@ SPEED_OFFSET = 44.6
 SPEED_FACTOR_SIDEWAY = 0.5
 SPEED_FACTOR_DIAGONAL = 0.63
 
+lastMessage = time.time()
+TIMEOUT = 5  # stop cart when navManager stopped
+obstacleInfo = []
 
 class Direction(Enum):
     STOP = 0
@@ -44,6 +52,7 @@ class Direction(Enum):
 
 # odometry is only active when cart is moving
 _cartMoving = False
+_cartMoveTimeout = 0
 _cartRotating = False
 _requestedCartSpeed = 0
 _cartSpeedFromOdometry = 0
@@ -55,15 +64,17 @@ _moveStartX = 0
 _moveStartY = 0
 _targetOrientation = 0
 _moveStartTime = None
-_odometryRunning = False
 _lastCartCommand = ""
 _orientationBeforeMove = 0
 _moveDirection = 0
 
 # Current cart position (center of cart) relative to map center, values in mm
-_cartOrientation = 0
-_cartPositionX = 0
-_cartPositionY = 0
+_imuOrientation = 0
+_cartOrientationCorrection = 0
+_cartLocationX = 0
+_cartLocationY = 0
+_cartTargetLocationX = 0
+_cartTargetLocationY = 0
 
 _lastBatteryCheckTime = time.time()
 _batteryStatus = None
@@ -74,6 +85,7 @@ _mVolts12V = 0
 # PIX_PER_MM = 0.7
 
 navManager = None
+xmlrpcClient = None
 
 taskStarted = time.time()
 _f = None
@@ -82,11 +94,16 @@ _f = None
 # def startlog():
 #    logging.basicConfig(filename="cartControl.log", level=logging.INFO, format='%(asctime)s - %(name)s - %(message)s', filemode="w")
 
+def setXmlrpcClient(c):
+    global xmlrpcClient
+    xmlrpcClient = c
+
+
 def log(msg):
     print(f"time: {time.time()-taskStarted:.3f} " + msg)
 
-    if navManager is not None:
-        navManager.root.recordLog("cart - " + msg)
+    if xmlrpcClient is not None:
+        xmlrpcClient.exposed_log("cartControl - " + msg)
 
 
 def saveImg(img, frameNr):
@@ -100,41 +117,17 @@ def setCartMoveDistance(distanceMm):
     global _moveDistanceRequested, _moveStartX, _moveStartY, _moveStartTime
 
     _moveDistanceRequested = distanceMm
-    _moveStartX = _cartPositionX
-    _moveStartY = _cartPositionY
+    _moveStartX = _cartLocationX
+    _moveStartY = _cartLocationY
     _moveStartTime = time.time()
 
 
-'''
-def getMoveDistance():
-    return _moveDistanceRequested
-'''
-'''
-def currMoveDistance():
-
-    dx = np.abs(_cartPositionX - _moveStartX)
-    dy = np.abs(_cartPositionY - _moveStartY)
-
-    return int(np.hypot(dx, dy))
-'''
-'''
-def checkMoveDistanceReached():
-
-    #log(f"moveDistance requested {_moveDistanceRequested}, moveDistance current {int(currMoveDistance())}, moveTime: {time.time() - _moveStartTime:.2f}")
-
-    return currMoveDistance() >= _moveDistanceRequested
-'''
-'''
-def getRemainingDistance():
-    return _moveDistanceRequested - currMoveDistance()
-'''
-
-
-def setCartMoving(new):
-    global _cartMoving  # , _lastTrackedMoveDuration
+def setCartMoving(newState, timeout=0):
+    global _cartMoving, _cartMoveTimeout  # , _lastTrackedMoveDuration
 
     # log(f"setCartMoving {new}")
-    _cartMoving = new
+    _cartMoving = newState
+    _cartMoveTimeout = timeout
 
     if isCartRotating():
         setCartRotating(False)
@@ -157,9 +150,11 @@ def setTargetOrientation(relAngle):  # CartRotating(new):
 
     global _targetOrientation
 
-    _targetOrientation = (_cartOrientation + relAngle) % 360
-    log(
-        f"setTargetOrientation -> currOrientation: {_cartOrientation}, relAngle: {relAngle}, targetOrientation: {_targetOrientation}")
+    _targetOrientation = (getCartOrientation() + relAngle) % 360
+    log(f"setTargetOrientation -> currOrientation: {getCartOrientation()}, relAngle: {relAngle}, targetOrientation: {_targetOrientation}")
+    locX, locY = getCartLocation()
+    if navManager is not None:
+        navManager.root.updateCartInfo(locX, locY, getCartOrientation())
     setCartRotating(True)
 
 
@@ -188,113 +183,92 @@ def getRequestedCartSpeed():
     return _requestedCartSpeed
 
 
-def setCartSpeedFromOdometry(speed):
-    global _cartSpeedFromOdometry
-
-    _cartSpeedFromOdometry = speed
-
-
-def getCartSpeedFromOdometry():
-    return _cartSpeedFromOdometry
-
-
-def setOrientation(new):
-    global _cartOrientation
-
-    _cartOrientation = round(new)
-
-
-def getOrientation():
-    return _cartOrientation
-
-
-def calculateNewCartPosition(orientation, distance, direction):
-    global _cartPositionX, _cartPositionY
-
-    # take cart orientation and cart move direction into account
-    # add 90 degrees to make a forward move with direction 0 a Y+ move
-    startX, startY = getMoveStart()
-
-    if direction == Direction.FORWARD.value:
-        moveDirection = _cartOrientation
-    elif direction == Direction.BACKWARD.value:
-        moveDirection = (90 + _cartOrientation + 180) % 360
-    elif direction == Direction.LEFT.value:
-        moveDirection = (90 + _cartOrientation + 90) % 360
-    elif direction == Direction.RIGHT.value:
-        moveDirection = (90 + _cartOrientation - 90) % 360
-    elif direction == Direction.FOR_DIAG_LEFT.value:
-        moveDirection = (90 + _cartOrientation + 45) % 360
-    elif direction == Direction.FOR_DIAG_RIGHT.value:
-        moveDirection = (90 + _cartOrientation - 45) % 360
-    elif direction == Direction.BACK_DIAG_LEFT.value:
-        moveDirection = (90 + _cartOrientation + 135) % 360
-    elif direction == Direction.BACK_DIAG_RIGHT.value:
-        moveDirection = (90 + _cartOrientation - 135) % 360
+def evalTrigDegrees(orientation, moveDirection):
+    """
+    set moveDegrees based on moveDirection
+    :param orientation:
+    :param moveDirection:
+    :return:
+    """
+    moveDegrees = None
+    if moveDirection == Direction.FORWARD.value:
+        moveDegrees = 180
+    elif moveDirection == Direction.BACKWARD.value:
+        moveDegrees = 0
+    elif moveDirection == Direction.LEFT.value:
+        moveDegrees = 90
+    elif moveDirection == Direction.RIGHT.value:
+        moveDegrees = - 90
+    elif moveDirection == Direction.FOR_DIAG_LEFT.value:
+        moveDegrees = 135
+    elif moveDirection == Direction.FOR_DIAG_RIGHT.value:
+        moveDegrees = - 135
+    elif moveDirection == Direction.BACK_DIAG_LEFT.value:
+        moveDegrees = 45
+    elif moveDirection == Direction.BACK_DIAG_RIGHT.value:
+        moveDegrees = -45
+    if moveDegrees is None:
+        return None
     else:
-        moveDirection = None
-
-    if moveDirection is not None:
-        _cartPositionX = startX + int(distance * np.cos(np.radians(moveDirection)))
-        _cartPositionY = startY + int(distance * np.sin(np.radians(moveDirection)))
+        return (orientation + moveDegrees + 90) % 360  # make 0 degrees pointing to the right in circle
 
 
-'''
-def setCartPosition(newX, newY):
+def updateCartLocation(orientation, distance, moveDirection):
+    """
+    based on update messages from the cart update the current cart position
+    :param orientation:
+    :param distance:
+    :param moveDirection:
+    :return:
+    """
 
-    global _cartPositionX, _cartPositionY
+    global _cartLocationX, _cartLocationY
 
-    _cartPositionX = newX
-    _cartPositionY = newY
-'''
+    # for x/y change calculation we need degrees that start to the right (normal circle)
+    # take cart orientation and cart move direction into account
+    # cart orientation 0 is straight up
+    trigDegrees = evalTrigDegrees(orientation, moveDirection)
+    if trigDegrees is not None:
+        _cartLocationX = _moveStartX + int(distance * np.cos(np.radians(trigDegrees)))
+        _cartLocationY = _moveStartY + int(distance * np.sin(np.radians(trigDegrees)))
+    #log(f"updateCartLocation, from X,Y {_moveStartX},{_moveStartY}, dist: {distance}, ori: {orientation}, dir: {moveDirection}, deg: {trigDegrees}, x/y: {_cartLocationX}/{_cartLocationY}")
 
 
-def getCartPosition():
-    return _cartPositionX, _cartPositionY
+def calculateCartTargetLocation(orientation, distance, moveDirection):
+
+    global _cartTargetLocationX, _cartTargetLocationY
+
+    # for x/y change calculation we need degrees that start to the right (normal circle)
+    # take cart orientation and cart move direction into account
+    # cart orientation 0 is straight up
+    trigDegrees = evalTrigDegrees(orientation, moveDirection)
+    if trigDegrees is not None:
+        _cartTargetLocationX = _moveStartX + int(distance * np.cos(np.radians(trigDegrees)))
+        _cartTargetLocationY = _moveStartY + int(distance * np.sin(np.radians(trigDegrees)))
+
+    print(f"target x/y: {_cartTargetLocationX:2f} / {_cartTargetLocationY:2f}")
+
+def getCartLocation():
+    return _cartLocationX, _cartLocationY
+
+
+def setImuOrientation(new):
+
+    global _imuOrientation
+
+    _imuOrientation = round(new)
+
+
+def getCartOrientation():
+    return (_imuOrientation + _cartOrientationCorrection) % 360
 
 
 def getMoveStart():
     return _moveStartX, _moveStartY
 
 
-'''
-not used as optical movement recognition did not work
-def updateCartPositionInMm(dxPix, dyPix, duration):     # distance is pixels, cart position is mm
-
-    global _lastDistance
-
-    #log(f"updateCartPosition based on floor images, dx: {dx}, dy: {dy}")
-    pixPerSec = np.hypot(dxPix, dyPix) / duration
-
-    posX, posY = getCartPosition()
-    posX += int(dxPix * PIX_PER_MM)
-    posY += int(dyPix * PIX_PER_MM)
-    setCartPosition(posX, posY)
-
-    startX, startY = getMoveStart()
-    dxMoved = np.abs(posX - startX)
-    dyMoved = np.abs(posY - startY)
-    currDistance = np.hypot(dxMoved, dyMoved)
-
-    log(f"cartMovement[mm] total distance: {currDistance:.0f}, total time: {time.time() - _moveStartTime:.2f}, curr speed Pix/s: {pixPerSec:.2f}")
- #       _lastDistance = currDistance
-
-
-
-def setOdometryRunning(newStatus):
-
-    global _odometryRunning
-
-    _odometryRunning = newStatus
-
-
-def isOdometryRunning():
-    return _odometryRunning
-'''
-
-
 def getRemainingRotation():
-    d = abs(_cartOrientation - _targetOrientation) % 360
+    d = abs(getCartOrientation() - _targetOrientation) % 360
     return 360 - d if d > 180 else d
 
 
@@ -344,14 +318,20 @@ def setVoltage12V(value):
 
 def saveCartLocation():
     # Saving the objects:
-    cartData = {'posX': int(_cartPositionX), 'posY': int(_cartPositionY), 'orientation': int(_cartOrientation)}
+    cartData = {'posX': int(_cartLocationX), 'posY': int(_cartLocationY), 'orientation': getCartOrientation()}
     filename = f"cartLocation.json"
     with open(filename, "w") as write_file:
         json.dump(cartData, write_file)
 
 
 def loadCartLocation():
-    global _cartPositionX, _cartPositionY, _cartOrientation
+    """
+    we load the cart location from the file system
+    as the carts imu is reset with each start of the cart the carts orientation might be 0
+    set an orientationCorrection value to account for this
+    :return:
+    """
+    global _cartLocationX, _cartLocationY, _cartOrientationCorrection
 
     # Getting back the last saved cart data
     filename = f"cartLocation.json"
@@ -359,13 +339,18 @@ def loadCartLocation():
         with open(filename, "r") as read_file:
             cartData = json.load(read_file)
 
-        _cartPositionX = cartData['posX']
-        _cartPositionY = cartData['posY']
-        _cartOrientation = cartData['orientation']
+        _cartLocationX = cartData['posX']
+        _cartLocationY = cartData['posY']
+        lastOrientation = cartData['orientation']
+        _cartOrientationCorrection = (lastOrientation - _imuOrientation) % 360
+
     else:
-        _cartPositionX = 0
-        _cartPositionY = 0
+        _cartLocationX = 0
+        _cartLocationY = 0
         _cartOrientation = 0
+        _cartOrientationCorrection = 0
+
+    print(f"loadCartLocation, cartOrientationCorrection: {_cartOrientationCorrection}")
 
 
 def setMoveDirection(direction):

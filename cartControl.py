@@ -1,22 +1,18 @@
-import os
-import sys
+
+
 import time
 import threading
 import numpy as np
-import rpyc
-from rpyc.utils.server import ThreadedServer
-import win32gui  # part of pywin32
-
-import gui
-import arduino
 
 import config
+import arduinoReceive
+import arduinoSend
+import rpcReceive
+import gui
+
 
 CART_PORT = 20003
 
-lastMessage = time.time()
-TIMEOUT = 5  # stop cart when navManager stopped
-obstacleInfo = []
 
 NUM_DISTANCE_SENSORS = 10
 NUM_MEASUREMENTS_PER_SCAN = 11
@@ -82,7 +78,7 @@ def cartInit():
     print("cart gui started")
 
     # start serial reader for arduino messages
-    msgThread = threading.Thread(target=arduino.readMessages, args={})
+    msgThread = threading.Thread(target=arduinoReceive.readMessages, args={})
     print("start msg reader cart-arduino")
     msgThread.start()
 
@@ -107,6 +103,9 @@ def cartInit():
         print("cart - timeout in startup, terminating")
         raise SystemExit()
 
+    # get current orientation of cart (bno055)
+    arduinoSend.requestCartOrientation()
+    time.sleep(0.1)
     config.loadCartLocation()
 
 
@@ -134,99 +133,16 @@ def setSensorDataShown(sensorID, new):
     distanceSensors[sensorID]['newValuesShown'] = new
 
 
-class cartCommands(rpyc.Service):
-
-    def on_disconnect(self):
-        print("connection to navManager lost")
-
-        print("EOF Error in cartControl, try to restart the task")
-
-        # arduino.ser.close()
-        config.navManager.close()
-        # task = sys.executable
-        # os.execl(task, task, * sys.argv)
-
-    def exposed_startListening(self, logIP, logPort):
-        '''
-        a first call from navManager
-        '''
-        if not config.standAloneMode:
-            try:
-                config.navManager = rpyc.connect(logIP, logPort)
-                config.navManager.root.connectionStatus("cart", True)
-                config.log("logger connection established")
-
-            except:
-                print("cart - could not establish connection to logger")
-                raise SystemExit()
-
-        if not config.standAloneMode:
-            config.navManager.root.processStatus("cart", True)
-
-    def exposed_rotateRelative(self, angle, speed):
-        if abs(angle) > 0:
-            config.log(f"exposed_rotateRelative, angle: {angle:.1f}")
-            arduino.sendRotateCommand(int(angle), int(speed))
-            gui.controller.updateTargetRotation(config.getOrientation() + int(angle))
-
-    def exposed_move(self, direction, speed, distance=10):
-        config.log(f"exposed_move, direction: {direction}, speed: {speed}, distance: {distance}")
-        arduino.sendMoveCommand(direction, speed, distance)
-
-    def exposed_stop(self):
-        config.log("exposed_stop")
-        gui.controller.stopCart()
-
-    def exposed_requestCartOrientation(self):
-        return config.getOrientation()
-
-    def exposed_heartBeat(self):
-        global lastMessage
-
-        # watchdog for incoming commands from navManager
-        # stop cart if we do not get regular messages
-        currTime = int(round(time.time() * 1000))
-        config.log(currTime - lastMessage)
-        if currTime - lastMessage > TIMEOUT:
-            if config.isCartMoving:
-                arduino.sendStopCommand("missing heartbeat from navManager")
-        else:
-            arduino.sendHeartbeat()
-            config.log("arduino Heartbeat sent")
-
-        lastMessage = int(round(time.time() * 1000))
-
-    def exposed_getObstacleInfo(self):
-        return obstacleInfo
-
-    def exposed_getCartInfo(self):
-        posX, posY = config.getCartPosition()
-        return config.getOrientation(), posX, posY, config.isCartMoving(), config.isCartRotating()
-
-    def exposed_getBatteryStatus(self):
-        return config.getBatteryStatus()
-
-    def exposed_isCartMoving(self):
-        return config.isCartMoving()
-
-    def exposed_isCartRotating(self):
-        return config.isCartRotating()
-
-
 if __name__ == '__main__':
-
-    windowName = "marvin//cartControl"
-    os.system("title " + windowName)
-    hwnd = win32gui.FindWindow(None, windowName)
-    win32gui.MoveWindow(hwnd, 280, 0, 1200, 400, True)
 
     print("startup cart")
     cartInit()
 
     if not config.standAloneMode:
-        config.log("wait for messages from navManager ...")
-        t = ThreadedServer(cartCommands, port=CART_PORT)
-        t.start()
+
+        # start the xmlrpc thread (setup and loop)
+        print("aruco - wait for xmlrpc messages on port {config.MY_XMLRPC_PORT}")
+        rpcReceive.xmlrpcListener()
 
 
 

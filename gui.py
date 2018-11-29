@@ -2,11 +2,12 @@ import time
 import collections
 import tkinter as tk
 import numpy as np
-import psutil
 
-import arduino
 import config
+import arduinoReceive
+import arduinoSend
 import cartControl
+
 
 CANV_WIDTH = 300
 CANV_HEIGHT = 500
@@ -172,7 +173,7 @@ class manualControl:
         self.separator1 = tk.Frame(frame, height=3, bd=2, relief=tk.SUNKEN)
         self.separator1.grid(row=45, column=0, columnspan=2, pady=10, sticky="we")
 
-        self.lblRotationHelp1 = tk.Label(frame, text="- counterclock")
+        self.lblRotationHelp1 = tk.Label(frame, text="+ counterclock")
         self.lblRotationHelp1.grid(row=50, column=0, sticky=tk.E)
 
         self.sbRotation = tk.Spinbox(frame, from_=-90, to=90, width=3)
@@ -180,7 +181,7 @@ class manualControl:
         self.sbRotation.delete(0, "end")
         self.sbRotation.insert(0, 30)
 
-        self.lblRotationHelp2 = tk.Label(frame, text="+ clockwise")
+        self.lblRotationHelp2 = tk.Label(frame, text="- clockwise")
         self.lblRotationHelp2.grid(row=52, column=0, sticky=tk.E)
 
         self.btnRotate = tk.Button(frame, text="Rotate", state="disabled", command=self.rotateCart)
@@ -271,7 +272,7 @@ class manualControl:
 
         # cartGlobal.log("showNewDistancies")
 
-        cartControl.obstacleInfo = []
+        config.obstacleInfo = []
 
         r = cartControl.NUM_DISTANCE_SENSORS
 
@@ -329,7 +330,7 @@ class manualControl:
                     lineLength = 40
 
                 if lineLength < minRange or lineLength > maxRange:
-                    cartControl.obstacleInfo.append({'direction': s.get('direction'), 'position': s.get('position')})
+                    config.obstacleInfo.append({'direction': s.get('direction'), 'position': s.get('position')})
 
                     if age > 2:
                         col = "coral1"
@@ -364,7 +365,7 @@ class manualControl:
     def startArduino(self):
 
         config.log("try to open serial connection to arduino on cart (COM5)")
-        arduino.initSerial("COM5")
+        arduinoReceive.initSerial("COM5")
         self.lblInfo.configure(text="arduino connected, waiting for cart ready message", bg="white smoke", fg="orange")
         self.btnArduino.configure(state="disabled")
 
@@ -375,7 +376,7 @@ class manualControl:
         '''
         this is only called when arduino is not ready yet
         '''
-        # cartGlobal.log("checkArcuinoReady")
+        # cartGlobal.log("checkArduinoReady")
 
         if config.arduinoStatus == 1:
             self.lblInfo.configure(text="cart ready", bg="lawn green", fg="black")
@@ -404,10 +405,10 @@ class manualControl:
         else:
             self.lblHeartBeat.configure(fg="red")
 
-        arduino.sendHeartbeat()
+        arduinoSend.sendHeartbeat()
 
-        self.lblRotationCurrentValue.configure(
-            text=f"{config.getOrientation()} / {config._cartPositionX} / {config._cartPositionY}")
+        locX, locY = config.getCartLocation()
+        self.lblRotationCurrentValue.configure(text=f"{config.getCartOrientation()} / {locX} / {locY}")
 
         # check for updating new sensor data in gui
         self.showNewDistances()
@@ -430,9 +431,9 @@ class manualControl:
 
     def stopCart(self):
 
-        arduino.sendStopCommand("manual request")
-        arduino.getCartOrientation()
-        self.lblRotationCurrentValue.configure(text=str(config.getOrientation()))
+        arduinoSend.sendStopCommand("manual request")
+        arduinoSend.requestCartOrientation()
+        self.lblRotationCurrentValue.configure(text=str(config.getCartOrientation()))
         self.lblCommandValue.configure(text="Stop")
         self.w.update_idletasks()
 
@@ -441,14 +442,14 @@ class manualControl:
         cartSpeed = int(self.sbSpeed.get())
         distance = int(self.sbDist.get())
         config.log(f"moveCart, speed: {cartSpeed}, distance: {distance}")
-        arduino.sendMoveCommand(self.direction, cartSpeed, distance)
+        arduinoSend.sendMoveCommand(self.direction, cartSpeed, distance)
         self.lblCommandValue.configure(text="Move")
         # self.lblMove.configure(text=str(speed))
         self.w.update_idletasks()
 
     def testSensor(self):
 
-        arduino.sendReadSensorCommand(self.sensorTest)
+        arduinoSend.sendReadSensorCommand(self.sensorTest)
         self.lblCommandValue.configure(text="testSensors")
         self.w.update_idletasks()
 
@@ -457,9 +458,9 @@ class manualControl:
         relAngle = int(self.sbRotation.get())
 
         self.lblCommandValue.configure(text="Rotate")
-        targetOrientation = (config.getOrientation() + relAngle) % 360
+        targetOrientation = (config.getCartOrientation() + relAngle) % 360
         self.lblRotationTargetValue.configure(text=str(targetOrientation))
-        arduino.sendRotateCommand(relAngle, 150)
+        arduinoSend.sendRotateCommand(relAngle, 150)
         self.w.update_idletasks()
 
     def updateDistanceSensorObstacle(self, distance, sensorID):
