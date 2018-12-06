@@ -1,124 +1,136 @@
 
 import os
 import time
-
-from xmlrpc.server import SimpleXMLRPCServer
-import xmlrpc.client
+import rpyc
 
 import config
 import arduinoSend
 import gui
 
+clientList = []
+watchInterval = 5
 
-# xmlrpc
-xmlrpcServer  = None
-
-def xmlrpcListener():
-
-    global xmlrpcServer
-
-    xmlrpcServer = SimpleXMLRPCServer((config.MY_IP, config.MY_XMLRPC_PORT))
-
-    xmlrpcServer.register_function(exposed_register, "exposed_register")
-    xmlrpcServer.register_function(exposed_getLifeSignal, "exposed_getLifeSignal")
-    xmlrpcServer.register_function(exposed_move, "exposed_move")
-    xmlrpcServer.register_function(exposed_rotateRelative, "exposed_rotateRelative")
-    xmlrpcServer.register_function(exposed_stop, "exposed_stop")
-    xmlrpcServer.register_function(exposed_requestCartOrientation,"exposed_requestCartOrientation")
-    xmlrpcServer.register_function(exposed_heartBeat, "exposed_heartBeat")
-    xmlrpcServer.register_function(exposed_getObstacleInfo, "exposed_getObstacleInfo")
-    xmlrpcServer.register_function(exposed_getCartInfo, "exposed_getCartInfo")
-    xmlrpcServer.register_function(exposed_getBatteryStatus, "exposed_getBatteryStatus")
-    xmlrpcServer.register_function(exposed_isCartMoving, "exposed_isCartMoving")
-    xmlrpcServer.register_function(exposed_isCartRotating, "exposed_isCartRotating")
-    xmlrpcServer.register_function(exposed_terminate, "exposed_terminate")
-
-    xmlrpcServer.serve_forever()
+server = 'cartControl'
 
 
-def exposed_register(ip, port):
-    config.log(f"exposed_register request received from {ip}:{port}")
-    clientAddr = f"http://{ip}:{port}"
-    print(f"clientAddr: {clientAddr}")
-    try:
-        config.setXmlrpcClient(xmlrpc.client.ServerProxy(clientAddr))
-    except Exception as e:
-        print(f"failure to add client {ip}:{port} - {e}")
-        os._exit(1)
-    return True
+def addClient(c, i):
+
+    global clientList, watchInterval
+
+    clientList.append(c.copy())
+    watchInterval = i
+    print(f"client added, {c}")
 
 
-def exposed_getLifeSignal():
-    return True
+def updateMessageTime(pid):
+
+    global clientList
+
+    for i, c in enumerate(clientList):
+        if c['pid'] == pid:
+            #print(f"{time.time():.0f} update message time, pid {pid}, clientIndex: {i}")
+            clientList[i]['lastMessageReceivedTime'] = time.time()
+            #config.log(f"getLifeSignal time update, pid: {pid}, clientIndex: {i}, time: {time.time()}")
 
 
-def exposed_move(direction, speed, distance):
-    config.log(f"exposed_move (xmlrpc), direction: {direction}, speed: {speed}, distance: {distance}")
-    arduinoSend.sendMoveCommand(direction, speed, distance)
-    return True
+def removeClient(i):
+
+    global clientList
+
+    print(f"remove client from clientList, index: {i}, client: {clientList[i]}")
+    del clientList[i]
 
 
-def exposed_rotateRelative(angle, speed):
-    if abs(angle) > 0:
-        config.log(f"exposed_rotateRelative, angle: {angle:.1f}")
-        arduinoSend.sendRotateCommand(int(angle), int(speed))
-        gui.controller.updateTargetRotation(config.getCartOrientation() + int(angle))
-    return True
 
 
-def exposed_stop():
-    config.log("exposed_stop")
-    gui.controller.stopCart()
-    return True
+class cartControlListener(rpyc.Service):
+
+    ############################## common routines for clients
+    watchInterval = 5
+
+    def on_connect(self, conn):
+
+        print(f"{server} - on_connect triggered")
+        callerName = conn._channel.stream.sock.getpeername()
+        #self.persistConn = conn
+        clientPid, clientInterval = conn.root.exposed_getPid()
+
+        if clientInterval < self.watchInterval:   # use shortest client interval in watchdog loop
+            self.watchInterval = clientInterval
+
+        clientIndex = [i for i in clientList if i['conn'] == conn]
+        if len(clientIndex) == 0:
+            client = {'conn': conn,
+                      'callerName': callerName,
+                      'pid': clientPid,
+                      'interval': clientInterval,
+                      'lastMessageReceivedTime': time.time()}
+            addClient(client, self.watchInterval)
+        #config.log(f"on_connect in '{server}' with {client}")
 
 
-def exposed_requestCartOrientation():
-    return config.getCartOrientation()
+    def on_disconnect(self, conn):
+        callerName = conn._channel.stream.sock.getpeername()
+        print(f"{server} - on_disconnect triggered, conn: {callerName}")
 
 
-def exposed_heartBeat():
-    global lastMessage
+    def exposed_getLifeSignal(self, pid):
 
-    # watchdog for incoming commands from navManager
-    # stop cart if we do not get regular messages
-    currTime = int(round(time.time() * 1000))
-    config.log(currTime - lastMessage)
-    if currTime - lastMessage > config.TIMEOUT:
-        if config.isCartMoving:
-            arduinoSend.sendStopCommand("missing heartbeat from navManager")
-    else:
-        arduinoSend.sendHeartbeat()
-        config.log("arduino Heartbeat sent")
-
-    lastMessage = int(round(time.time() * 1000))
-    return True
+        updateMessageTime(pid)
+        return True
 
 
-def exposed_getObstacleInfo():
-    return config.obstacleInfo
+    def exposed_terminate(self):
+        print(f"{server} task - terminate request received")
+        os._exit(0)
+        return True
+    ############################## common routines for clients
 
 
-def exposed_getCartInfo():
-    posX, posY = config.getCartLocation()
-    return config.getCartOrientation(), posX, posY, config.isCartMoving(), config.isCartRotating()
+    def exposed_move(self, direction, speed, distance):
+        config.log(f"exposed_move (xmlrpc), direction: {direction}, speed: {speed}, distance: {distance}")
+        arduinoSend.sendMoveCommand(direction, speed, distance)
+        return True
 
 
-def exposed_getBatteryStatus():
-    return config.getBatteryStatus()
+    def exposed_rotateRelative(self, angle, speed):
+        if abs(angle) > 0:
+            config.log(f"exposed_rotateRelative, angle: {angle:.1f}")
+            arduinoSend.sendRotateCommand(int(angle), int(speed))
+            gui.controller.updateTargetRotation(config.getCartOrientation() + int(angle))
+        return True
 
 
-def exposed_isCartMoving():
-    return config.isCartMoving()
+    def exposed_stop(self):
+        config.log("exposed_stop")
+        gui.controller.stopCart()
+        return True
 
 
-def exposed_isCartRotating():
-    return config.isCartRotating()
+    def exposed_requestCartOrientation(self):
+        return config.getCartOrientation()
 
 
-def exposed_terminate():
-    config.log(f"cartControl - terminate command received")
-    os._exit(0)
-    return True
+    def exposed_getObstacleInfo(self):
+        return config.obstacleInfo
+
+
+    def exposed_getCartInfo(self):
+        cartX, cartY = config.getCartLocation()
+        return config.getCartOrientation(), cartX, cartY, config.isCartMoving(), config.isCartRotating()
+
+
+    def exposed_getBatteryStatus(self):
+        return config.getBatteryStatus()
+
+
+    def exposed_isCartMoving(self):
+        return config.isCartMoving()
+
+
+    def exposed_isCartRotating(self):
+        return config.isCartRotating()
+
 
 
 

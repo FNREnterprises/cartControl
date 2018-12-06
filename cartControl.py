@@ -5,6 +5,7 @@ import threading
 import numpy as np
 
 import config
+import watchDog
 import arduinoReceive
 import arduinoSend
 import rpcReceive
@@ -140,10 +141,18 @@ if __name__ == '__main__':
 
     if not config.standAloneMode:
 
-        # start the xmlrpc thread (setup and loop)
-        print("aruco - wait for xmlrpc messages on port {config.MY_XMLRPC_PORT}")
-        rpcReceive.xmlrpcListener()
+        from rpyc.utils.server import ThreadedServer
 
+        # start the watchDog for clientConnections
+        navThread = threading.Thread(target=watchDog.watchDog, args={})
+        navThread.setName("connectionWatchDog")
+        navThread.start()
+
+        print(f"start listening on port {config.MY_RPC_PORT}")
+        myConfig = {"allow_all_attrs": True, "allow_pickle": True}
+        server = ThreadedServer(rpcReceive.cartControlListener, port=config.MY_RPC_PORT, protocol_config=myConfig)
+
+        server.start()
 
 
 

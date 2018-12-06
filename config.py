@@ -1,5 +1,6 @@
 
 import time
+import datetime
 import sys
 import os
 import numpy as np
@@ -8,15 +9,6 @@ import cv2
 import json
 from enum import Enum
 
-#import arduino
-
-##################################################################
-# cartControl can run as slave of navManager or in standalone mode
-##################################################################
-standAloneMode = False  # False -> slave mode,  True -> standalone mode
-
-MY_IP = "192.168.0.17"
-MY_XMLRPC_PORT = 30001
 
 # configuration values for cart arduino infrared distance limits
 SHORT_RANGE_MIN = 6
@@ -25,6 +17,17 @@ LONG_RANGE_MIN = 12
 LONG_RANGE_MAX = 34
 delayBetweenDistanceMeasurements = 1  # can probably be lower when battery fully loaded
 
+import rpcSend
+
+##################################################################
+# cartControl can run as slave of navManager or in standalone mode
+##################################################################
+standAloneMode = False  # False -> slave mode,  True -> standalone mode
+
+MY_IP = "192.168.0.17"
+MY_RPC_PORT = 20001
+
+
 # values for arduino to calculate distance mm/s from speed value
 # (values depend on battery level too, see excel sheet for calc)
 SPEED_FACTOR = 1.49
@@ -32,8 +35,6 @@ SPEED_OFFSET = 44.6
 SPEED_FACTOR_SIDEWAY = 0.5
 SPEED_FACTOR_DIAGONAL = 0.63
 
-lastMessage = time.time()
-TIMEOUT = 5  # stop cart when navManager stopped
 obstacleInfo = []
 
 class Direction(Enum):
@@ -85,7 +86,6 @@ _mVolts12V = 0
 # PIX_PER_MM = 0.7
 
 navManager = None
-xmlrpcClient = None
 
 taskStarted = time.time()
 _f = None
@@ -94,16 +94,16 @@ _f = None
 # def startlog():
 #    logging.basicConfig(filename="cartControl.log", level=logging.INFO, format='%(asctime)s - %(name)s - %(message)s', filemode="w")
 
-def setXmlrpcClient(c):
-    global xmlrpcClient
-    xmlrpcClient = c
+
 
 
 def log(msg):
-    print(f"time: {time.time()-taskStarted:.3f} " + msg)
 
-    if xmlrpcClient is not None:
-        xmlrpcClient.exposed_log("cartControl - " + msg)
+    logtime = str(datetime.datetime.now())[11:]
+    print(f"{logtime} - {msg}")
+
+    rpcSend.publishLog("cartControl - " + msg)
+
 
 
 def saveImg(img, frameNr):
