@@ -150,7 +150,7 @@ if __name__ == '__main__':
 
         print(f"start listening on port {config.MY_RPC_PORT}")
         myConfig = {"allow_all_attrs": True, "allow_pickle": True}
-        server = ThreadedServer(rpcReceive.cartControlListener, port=config.MY_RPC_PORT, protocol_config=myConfig)
+        server = ThreadedServer(rpcReceive.rpcListener, port=config.MY_RPC_PORT, protocol_config=myConfig)
 
         server.start()
 

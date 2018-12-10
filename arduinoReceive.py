@@ -1,3 +1,5 @@
+
+import os
 import sys
 import time
 import serial
@@ -43,7 +45,13 @@ def readMessages():
 
     while ser.is_open:
 
-        if ser.inWaiting() > 0:
+        try:
+            numBytesAvailable = ser.inWaiting()
+        except Exception as e:
+            config.log(f"exception on ser.inWaiting: {e}")
+            os._exit(1)
+
+        if numBytesAvailable > 0:
             # cartGlobal.log(f"inWaiting > 0")
             recvB = ser.readline(120)
             try:

@@ -7,9 +7,11 @@ def publishLog(msg):
 
     for i, c in enumerate(rpcReceive.clientList):
 
-        try:
-            c['conn'].root.exposed_log(msg)
+        if c['replyConn'] is not None:
 
-        except Exception as e:
-            rpcReceive.removeClient(i)
-            config.log(f"exception in publishLog: {str(e)}, client removed from clientList")
+            try:
+                c['replyConn'].root.exposed_log(msg)
+
+            except Exception as e:
+                config.log(f"exception in publishLog with {c['clientId']}: {e}")
+                c['replyConn'] = None

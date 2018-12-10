@@ -43,40 +43,42 @@ def removeClient(i):
 
 
 
-class cartControlListener(rpyc.Service):
+class rpcListener(rpyc.Service):
 
     ############################## common routines for clients
     watchInterval = 5
 
     def on_connect(self, conn):
-
-        print(f"{server} - on_connect triggered")
+        print(f"on_connect seen {conn}")
         callerName = conn._channel.stream.sock.getpeername()
-        #self.persistConn = conn
-        clientPid, clientInterval = conn.root.exposed_getPid()
-
-        if clientInterval < self.watchInterval:   # use shortest client interval in watchdog loop
-            self.watchInterval = clientInterval
-
-        clientIndex = [i for i in clientList if i['conn'] == conn]
-        if len(clientIndex) == 0:
-            client = {'conn': conn,
-                      'callerName': callerName,
-                      'pid': clientPid,
-                      'interval': clientInterval,
-                      'lastMessageReceivedTime': time.time()}
-            addClient(client, self.watchInterval)
-        #config.log(f"on_connect in '{server}' with {client}")
+        print(f"caller: {callerName}")
 
 
-    def on_disconnect(self, conn):
-        callerName = conn._channel.stream.sock.getpeername()
-        print(f"{server} - on_disconnect triggered, conn: {callerName}")
+    def exposed_requestForReplyConnection(self, ip, port, interval=5):
+
+        print(f"request for reply connection {ip}:{port}")
+        replyConn = rpyc.connect(ip, port)
+
+        clientId = (ip, port)
+        connectionUpdated = False
+        for c in clientList:
+            if c['clientId'] == clientId:
+                print(f"update client connection")
+                c['replyConn'] = replyConn
+                connectionUpdated = True
+
+        if not connectionUpdated:
+            print(f"append client connection {clientId}")
+            clientList.append({'clientId': clientId, 'replyConn': replyConn, 'lastMessageReceivedTime': time.time(), 'interval': interval})
 
 
-    def exposed_getLifeSignal(self, pid):
+    def exposed_getLifeSignal(self, ip, port):
 
-        updateMessageTime(pid)
+        for c in clientList:
+            if c['clientId'] == (ip, port):
+                #print(f"life signal received from  {ip}, {port}, {time.time()}")
+                c['lastMessageReceivedTime'] = time.time()
+
         return True
 
 
@@ -84,6 +86,7 @@ class cartControlListener(rpyc.Service):
         print(f"{server} task - terminate request received")
         os._exit(0)
         return True
+
     ############################## common routines for clients
 
 
