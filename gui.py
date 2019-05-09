@@ -3,11 +3,9 @@ import collections
 import tkinter as tk
 import numpy as np
 
-import config
-import arduinoReceive
 import arduinoSend
 import cartControl
-
+import config
 
 CANV_WIDTH = 300
 CANV_HEIGHT = 500
@@ -130,11 +128,10 @@ class manualControl:
         frame = tk.Frame(self.w)
         frame.grid(row=0, column=0, sticky='n')
 
-        self.btnArduino = tk.Button(frame, text="Arduino", command=self.startArduino)
-        self.btnArduino.grid(row=0, columnspan=2)
-
         self.lblInfo = tk.Label(frame, text="wait for Arduino button pressed", fg="white", bg="red")
         self.lblInfo.grid(row=1, columnspan=2)
+        self.lblInfo.configure(text="waiting for cart ready message", bg="white smoke", fg="orange")
+        #self.btnArduino.configure(state="disabled")
 
         # informational elements
         ##########################
@@ -219,35 +216,13 @@ class manualControl:
         self.btnMove = tk.Button(frame, text="Move", state="disabled", command=self.moveCart)
         self.btnMove.grid(row=64, column=1, padx=10, sticky=tk.W)
 
-        # navigate
-        ############################################
-        self.separator3 = tk.Frame(frame, height=3, bd=2, relief=tk.SUNKEN)
-        self.separator3.grid(row=79, column=0, columnspan=2, pady=10, sticky="we")
-
-        self.lblXValue = tk.Label(frame, text="X: ")
-        self.lblXValue.grid(row=80, column=0, pady=0, sticky=tk.E)
-
-        self.sbX = tk.Spinbox(frame, from_=0, to=400, text="300", width=3)
-        self.sbX.grid(row=80, column=1, padx=10, sticky=tk.W)
-        self.sbX.insert(0, 30)
-
-        self.lblYValue = tk.Label(frame, text="Y: ")
-        self.lblYValue.grid(row=82, column=0, sticky=tk.E)
-
-        self.sbY = tk.Spinbox(frame, from_=0, to=400, width=3)
-        self.sbY.grid(row=82, column=1, padx=10, sticky=tk.W)
-        self.sbY.insert(0, 34)
-
-        self.btnNav = tk.Button(frame, text="Navigate", state="normal", command=self.navigateTo)
-        self.btnNav.grid(row=84, column=1, padx=10, sticky=tk.W)
-
         # sensor test
         ##############
         self.separator4 = tk.Frame(frame, height=3, bd=2, relief=tk.SUNKEN)
         self.separator4.grid(row=90, column=0, columnspan=2, pady=10, sticky="we")
 
-        self.sensorTestChoices = ["forward", "left", "right", "backward"]
-        defaultSensorTest = "forward"
+        self.sensorTestChoices = ["FLnear", "FLfar", "FRnear", "FRfar", "Lnear", "Rnear", "BLnear","BLfar","BRnear", "BRfar"]
+        defaultSensorTest = "FLnear"
         self.sensorTest = self.sensorTestChoices.index(defaultSensorTest)
 
         testSensor = tk.StringVar(gui)
@@ -265,8 +240,8 @@ class manualControl:
         self.btnStop = tk.Button(frame, text="STOP CART", state="normal", command=self.stopCart, bg="red", fg="white")
         self.btnStop.grid(row=200, column=0, columnspan=2, pady=0)
 
-        if config.arduinoStatus == 0:
-            self.startArduino()
+        self.checkArduinoReady()
+
 
     def showNewDistances(self):
 
@@ -274,11 +249,11 @@ class manualControl:
 
         config.obstacleInfo = []
 
-        r = cartControl.NUM_DISTANCE_SENSORS
+        r = config.NUM_DISTANCE_SENSORS
 
         for i in range(r):
-            s = cartControl.distanceSensors[i]
-            d = cartControl.distanceList[i]
+            s = config.distanceSensors[i]
+            d = config.distanceList[i]
             sensor = sensors[i]
 
             # check for new data
@@ -317,7 +292,7 @@ class manualControl:
                 minRange = config.SHORT_RANGE_MIN
                 maxRange = config.SHORT_RANGE_MAX
 
-            for k in range(cartControl.NUM_MEASUREMENTS_PER_SCAN):
+            for k in range(config.NUM_MEASUREMENTS_PER_SCAN):
 
                 # line color depends on distance value
 
@@ -362,32 +337,22 @@ class manualControl:
     def selectedSensorTest(self, value):
         self.sensorTest = self.sensorTestChoices.index(value)
 
-    def startArduino(self):
-
-        config.log("try to open serial connection to arduino on cart (COM5)")
-        arduinoReceive.initSerial("COM5")
-        self.lblInfo.configure(text="arduino connected, waiting for cart ready message", bg="white smoke", fg="orange")
-        self.btnArduino.configure(state="disabled")
-
-        self.w.update_idletasks()
-        self.w.after(2000, self.checkArduinoReady)
 
     def checkArduinoReady(self):
         '''
         this is only called when arduino is not ready yet
         '''
-        # cartGlobal.log("checkArduinoReady")
-
-        if config.arduinoStatus == 1:
+        if config.arduinoStatus == 2:
             self.lblInfo.configure(text="cart ready", bg="lawn green", fg="black")
             self.btnRotate.configure(state="normal")
             self.btnMove.configure(state="normal")
-            self.btnNav.configure(state="normal")
+            #self.btnNav.configure(state="normal")
             self.w.update_idletasks()
             self.w.after(100, self.heartBeat)
 
         else:
             self.w.after(400, self.checkArduinoReady)
+
 
     def navigateTo(self):
         start = time.time()
@@ -395,11 +360,12 @@ class manualControl:
         config.log(f"analyzed in: {time.time() - start} seconds")
         self.w.update_idletasks()
 
+
     def heartBeat(self):
 
-        # cartGlobal.log("heartBeat")
+        #config.log("heartBeat")
 
-        # toggle heartBeat message color
+        # toggle heartBeat display color
         if self.lblHeartBeat.cget("fg") == "red":
             self.lblHeartBeat.configure(fg="green")
         else:
@@ -407,16 +373,16 @@ class manualControl:
 
         arduinoSend.sendHeartbeat()
 
-        locX, locY = config.getCartLocation()
-        self.lblRotationCurrentValue.configure(text=f"{config.getCartOrientation()} / {locX} / {locY}")
+        locX, locY = cartControl.getCartLocation()
+        self.lblRotationCurrentValue.configure(text=f"{cartControl.getCartYaw()} / {locX:.0f} / {locY:.0f}")
 
         # check for updating new sensor data in gui
         self.showNewDistances()
 
         # update battery level every x seconds
-        if time.time() - config.getLastBatteryCheckTime() > 5:
-            config.updateBatteryStatus()
-            battery = config.getBatteryStatus()
+        if time.time() - cartControl.getLastBatteryCheckTime() > 5:
+            cartControl.updateBatteryStatus()
+            battery = cartControl.getBatteryStatus()
             plugged = battery.power_plugged
             if not plugged:
                 plugged = "on battery"
@@ -424,16 +390,17 @@ class manualControl:
                 plugged = "docked"
             batteryInfo = f", power: {plugged}, percent: {battery.percent:.0f}"
             self.lblInfo.configure(text="cart ready" + batteryInfo, bg="lawn green", fg="black")
-            config.setLastBatteryCheckTime(time.time())
+            cartControl.setLastBatteryCheckTime(time.time())
 
         self.w.update_idletasks()
         self.w.after(500, self.heartBeat)  # heart beat loop
+
 
     def stopCart(self):
 
         arduinoSend.sendStopCommand("manual request")
         arduinoSend.requestCartOrientation()
-        self.lblRotationCurrentValue.configure(text=str(config.getCartOrientation()))
+        self.lblRotationCurrentValue.configure(text=str(cartControl.getCartYaw()))
         self.lblCommandValue.configure(text="Stop")
         self.w.update_idletasks()
 
@@ -441,11 +408,12 @@ class manualControl:
 
         cartSpeed = int(self.sbSpeed.get())
         distance = int(self.sbDist.get())
-        config.log(f"moveCart, speed: {cartSpeed}, distance: {distance}")
-        arduinoSend.sendMoveCommand(self.direction, cartSpeed, distance)
+        config.log(f"moveCart requested from cart gui, speed: {cartSpeed}, distance: {distance}")
+        arduinoSend.sendMoveCommand(config.Direction(self.direction), cartSpeed, distance)
         self.lblCommandValue.configure(text="Move")
         # self.lblMove.configure(text=str(speed))
         self.w.update_idletasks()
+
 
     def testSensor(self):
 
@@ -453,12 +421,13 @@ class manualControl:
         self.lblCommandValue.configure(text="testSensors")
         self.w.update_idletasks()
 
+
     def rotateCart(self):
 
         relAngle = int(self.sbRotation.get())
 
         self.lblCommandValue.configure(text="Rotate")
-        targetOrientation = (config.getCartOrientation() + relAngle) % 360
+        targetOrientation = (cartControl.getCartYaw() + relAngle) % 360
         self.lblRotationTargetValue.configure(text=str(targetOrientation))
         arduinoSend.sendRotateCommand(relAngle, 150)
         self.w.update_idletasks()

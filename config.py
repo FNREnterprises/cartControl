@@ -2,22 +2,51 @@
 import time
 import datetime
 import sys
-import os
-import numpy as np
-import psutil
 import cv2
-import json
-from enum import Enum
-
+import numpy as np
+from enum import Enum, unique
+import logging
 
 # configuration values for cart arduino infrared distance limits
-SHORT_RANGE_MIN = 6
-SHORT_RANGE_MAX = 18
-LONG_RANGE_MIN = 12
+SHORT_RANGE_MIN = 10
+SHORT_RANGE_MAX = 20
+LONG_RANGE_MIN = 14
 LONG_RANGE_MAX = 34
-delayBetweenDistanceMeasurements = 1  # can probably be lower when battery fully loaded
+delayBetweenDistanceMeasurements = 2    # value 1 caused unstable analog read values from distance sensor (2.4.2019)
+finalDockingMoveDistance = 8            # distance to move forward after seeing activated docking switch
 
-import rpcSend
+"""
+static sensorDefinition sensorDefinitions[DISTANCE_SENSORS_COUNT]{
+	{ VL_NAH,  "VL_NAH ", A21, NAH, true, A0, VL, -1 },
+	{ VL_FERN, "VL_FERN", A21, FERN, true, A2, VL, -3 },
+	{ VR_NAH,  "VR_NAH ", A41, NAH, true, A1, VR, 4 },
+	{ VR_FERN, "VR_FERN", A21, FERN, true, A3, VR, -5 },
+	{ LM_NAH,  "LM_NAH ", A21, NAH, true, A13, LM, -1 },
+	{ RM_NAH,  "RM_NAH ", A21, NAH, true, A7, RM, 0 },
+	{ HL_NAH,  "HL_NAH ", A21, NAH, true, A8, HL, 2 },
+	{ HL_FERN, "HL_FERN", A21, FERN, true, A9, HL, 0 },
+	{ HR_NAH,  "HR_NAH ", A21, NAH, true, A10, HR, 3 },
+	{ HR_FERN, "HR_FERN", A21, FERN, true, A11, HR, 3 }
+"""
+#                              FL    FR   L  R   BL    BR
+#                             n  f  n  f  n  n  n  f  n  f
+distanceSensorCorrections = [-3,-5, 4,-5, 4, 3, 5, 8, 5, 0]
+
+
+##################################################################
+# needs to be the same as in navManager
+##################################################################
+@unique
+class cMoveState(Enum):
+    """
+    list of move states for single move and move sequence
+    """
+    PENDING = 0
+    IN_PROGRESS = 1
+    INTERRUPTED = 2
+    FINISHED = 3
+    FAILED = 4
+
 
 ##################################################################
 # cartControl can run as slave of navManager or in standalone mode
@@ -26,6 +55,7 @@ standAloneMode = False  # False -> slave mode,  True -> standalone mode
 
 MY_IP = "192.168.0.17"
 MY_RPC_PORT = 20001
+MY_NAME = 'cartControl'
 
 
 # values for arduino to calculate distance mm/s from speed value
@@ -35,7 +65,63 @@ SPEED_OFFSET = 44.6
 SPEED_FACTOR_SIDEWAY = 0.5
 SPEED_FACTOR_DIAGONAL = 0.63
 
+
+NUM_DISTANCE_SENSORS = 10
+NUM_MEASUREMENTS_PER_SCAN = 11
+
+distanceList = np.zeros((NUM_DISTANCE_SENSORS, NUM_MEASUREMENTS_PER_SCAN))
 obstacleInfo = []
+
+distanceSensors = []
+# VL nah
+distanceSensors.append(
+    {'sensorID': 0, 'direction': 'forward', 'position': 'left', 'range': 'short', 'newValuesShown': False,
+     'timestamp': time.time(), 'valueIndex': (0, 0), 'installed': True, 'servoIndex': 0, 'color': 'red',
+     'rotation': -180})
+# VL fern
+distanceSensors.append(
+    {'sensorID': 1, 'direction': 'forward', 'position': 'left', 'range': 'long', 'newValuesShown': False,
+     'timestamp': time.time(), 'valueIndex': (0, 1), 'installed': True, 'servoIndex': 0, 'color': 'blue',
+     'rotation': -180})
+# VR nah
+distanceSensors.append(
+    {'sensorID': 2, 'direction': 'forward', 'position': 'right', 'range': 'short', 'newValuesShown': False,
+     'timestamp': time.time(), 'valueIndex': (1, 0), 'installed': True, 'servoIndex': 1, 'color': 'red',
+     'rotation': -180})
+# VR fern
+distanceSensors.append(
+    {'sensorID': 3, 'direction': 'forward', 'position': 'right', 'range': 'long', 'newValuesShown': False,
+     'timestamp': time.time(), 'valueIndex': (1, 1), 'installed': True, 'servoIndex': 1, 'color': 'blue',
+     'rotation': -180})
+# LM nah
+distanceSensors.append(
+    {'sensorID': 4, 'direction': 'left', 'position': 'middle', 'range': 'short', 'newValuesShown': False,
+     'timestamp': time.time(), 'valueIndex': (2, 0), 'installed': True, 'servoIndex': 2, 'color': 'red',
+     'rotation': 90})
+# RM nah
+distanceSensors.append(
+    {'sensorID': 5, 'direction': 'right', 'position': 'middle', 'range': 'short', 'newValuesShown': False,
+     'timestamp': time.time(), 'valueIndex': (2, 1), 'installed': True, 'servoIndex': 2, 'color': 'red',
+     'rotation': -90})
+# HL nah
+distanceSensors.append(
+    {'sensorID': 6, 'direction': 'backward', 'position': 'left', 'range': 'short', 'newValuesShown': False,
+     'timestamp': time.time(), 'valueIndex': (3, 0), 'installed': True, 'servoIndex': 3, 'color': 'red', 'rotation': 0})
+# HL fern
+distanceSensors.append(
+    {'sensorID': 7, 'direction': 'backward', 'position': 'left', 'range': 'long', 'newValuesShown': False,
+     'timestamp': time.time(), 'valueIndex': (3, 1), 'installed': True, 'servoIndex': 3, 'color': 'blue',
+     'rotation': 0})
+# HR nah
+distanceSensors.append(
+    {'sensorID': 8, 'direction': 'backward', 'position': 'right', 'range': 'short', 'newValuesShown': False,
+     'timestamp': time.time(), 'valueIndex': (3, 0), 'installed': True, 'servoIndex': 4, 'color': 'red', 'rotation': 0})
+# HR fern
+distanceSensors.append(
+    {'sensorID': 9, 'direction': 'backward', 'position': 'right', 'range': 'long', 'newValuesShown': False,
+     'timestamp': time.time(), 'valueIndex': (3, 1), 'installed': True, 'servoIndex': 4, 'color': 'blue',
+     'rotation': 0})
+
 
 class Direction(Enum):
     STOP = 0
@@ -52,9 +138,9 @@ class Direction(Enum):
 
 
 # odometry is only active when cart is moving
-_cartMoving = False
+cartMoving = False
 _cartMoveTimeout = 0
-_cartRotating = False
+cartRotating = False
 _requestedCartSpeed = 0
 _cartSpeedFromOdometry = 0
 
@@ -63,47 +149,62 @@ _timeMovementBlocked = None
 _moveDistanceRequested = 0
 _moveStartX = 0
 _moveStartY = 0
+rotateStartDegrees = 0
 _targetOrientation = 0
 _moveStartTime = None
 _lastCartCommand = ""
 _orientationBeforeMove = 0
-_moveDirection = 0
+_moveDirection = Direction.STOP
 
 # Current cart position (center of cart) relative to map center, values in mm
-_imuOrientation = 0
-_cartOrientationCorrection = 0
-_cartLocationX = 0
-_cartLocationY = 0
+imuDegrees = 0
+imuDegreesCorrection = 0
+_imuPitch = 0.0
+_imuRoll = 0.0
+
+cartLocationX = 0
+cartLocationY = 0
 _cartTargetLocationX = 0
 _cartTargetLocationY = 0
+cartLastPublishTime = time.time()
+lastLocationSaveTime = time.time()
+
+
+CENTER_OF_CART_ROTATION_X = 0
+CENTER_OF_CART_ROTATION_Y = -30
 
 _lastBatteryCheckTime = time.time()
 _batteryStatus = None
+arduino = None
 arduinoStatus = 0
 _mVolts12V = 0
-
-# pixel-width in mm at 13 cm distance from ground
-# PIX_PER_MM = 0.7
-
-navManager = None
+_mVolts6V = 0
 
 taskStarted = time.time()
 _f = None
 
 
+kinectIp = MY_IP
+kinectPort = 20003
+kinectConnection = None
+monitoringWithKinect = False
+firstKinectConnectionAttempt = True
+
 # def startlog():
 #    logging.basicConfig(filename="cartControl.log", level=logging.INFO, format='%(asctime)s - %(name)s - %(message)s', filemode="w")
+cartReady = False
+clientList = []
 
+import rpcSend      # problem when importing at start of file in gui.py
 
+def log(msg, publish=True):
 
-
-def log(msg):
-
-    logtime = str(datetime.datetime.now())[11:]
+    logtime = str(datetime.datetime.now())[11:22]
+    logging.info(f"{logtime} - {msg}")
     print(f"{logtime} - {msg}")
 
-    rpcSend.publishLog("cartControl - " + msg)
-
+    if publish:
+        rpcSend.publishLog("cartControl - " + msg)
 
 
 def saveImg(img, frameNr):
@@ -113,249 +214,51 @@ def saveImg(img, frameNr):
         log(f"cartGlobal, saveImg exception {sys.exc_info()[0]}")
 
 
-def setCartMoveDistance(distanceMm):
-    global _moveDistanceRequested, _moveStartX, _moveStartY, _moveStartTime
 
-    _moveDistanceRequested = distanceMm
-    _moveStartX = _cartLocationX
-    _moveStartY = _cartLocationY
-    _moveStartTime = time.time()
-
-
-def setCartMoving(newState, timeout=0):
-    global _cartMoving, _cartMoveTimeout  # , _lastTrackedMoveDuration
-
-    # log(f"setCartMoving {new}")
-    _cartMoving = newState
-    _cartMoveTimeout = timeout
-
-    if isCartRotating():
-        setCartRotating(False)
-
-
-def isCartMoving():
-    return _cartMoving
-
-
-def setCartRotating(new):
-    global _cartRotating
-
-    # log(f"setCartRotating {new}")
-    _cartRotating = new
-    if isCartMoving():
-        setCartMoving(False)
-
-
-def setTargetOrientation(relAngle):  # CartRotating(new):
-
-    global _targetOrientation
-
-    _targetOrientation = (getCartOrientation() + relAngle) % 360
-    log(f"setTargetOrientation -> currOrientation: {getCartOrientation()}, relAngle: {relAngle}, targetOrientation: {_targetOrientation}")
-    locX, locY = getCartLocation()
-    if navManager is not None:
-        navManager.root.updateCartInfo(locX, locY, getCartOrientation())
-    setCartRotating(True)
-
-
-def isCartRotating():
-    return _cartRotating
-
-
-def setMovementBlocked(new):
-    global _movementBlocked, _timeMovementBlocked
-
-    _movementBlocked = new
-    _timeMovementBlocked = time.time()
-
-
-def getMovementBlocked():
-    return _movementBlocked, _timeMovementBlocked
-
-
-def setRequestedCartSpeed(speed):
-    global _requestedCartSpeed
-
-    _requestedCartSpeed = speed
-
-
-def getRequestedCartSpeed():
-    return _requestedCartSpeed
-
-
-def evalTrigDegrees(orientation, moveDirection):
+def evalTrigDegrees(orientation, moveDirection: Direction):
     """
     set moveDegrees based on moveDirection
+    cart orientation 0 is to the right
     :param orientation:
     :param moveDirection:
     :return:
     """
+    #log(f"evalTrigDegrees, orientation: {orientation}, moveDirection: {moveDirection}")
+
     moveDegrees = None
-    if moveDirection == Direction.FORWARD.value:
-        moveDegrees = 180
-    elif moveDirection == Direction.BACKWARD.value:
+    if moveDirection == Direction.FORWARD:
         moveDegrees = 0
-    elif moveDirection == Direction.LEFT.value:
+    elif moveDirection == Direction.BACKWARD:
+        moveDegrees = 180
+    elif moveDirection == Direction.LEFT:
         moveDegrees = 90
-    elif moveDirection == Direction.RIGHT.value:
-        moveDegrees = - 90
-    elif moveDirection == Direction.FOR_DIAG_LEFT.value:
-        moveDegrees = 135
-    elif moveDirection == Direction.FOR_DIAG_RIGHT.value:
-        moveDegrees = - 135
-    elif moveDirection == Direction.BACK_DIAG_LEFT.value:
+    elif moveDirection == Direction.RIGHT:
+        moveDegrees = -90
+    elif moveDirection == Direction.FOR_DIAG_LEFT:
         moveDegrees = 45
-    elif moveDirection == Direction.BACK_DIAG_RIGHT.value:
+    elif moveDirection == Direction.FOR_DIAG_RIGHT:
         moveDegrees = -45
+    elif moveDirection == Direction.BACK_DIAG_LEFT:
+        moveDegrees = 135
+    elif moveDirection == Direction.BACK_DIAG_RIGHT:
+        moveDegrees = -135
     if moveDegrees is None:
         return None
     else:
-        return (orientation + moveDegrees + 90) % 360  # make 0 degrees pointing to the right in circle
-
-
-def updateCartLocation(orientation, distance, moveDirection):
-    """
-    based on update messages from the cart update the current cart position
-    :param orientation:
-    :param distance:
-    :param moveDirection:
-    :return:
-    """
-
-    global _cartLocationX, _cartLocationY
-
-    # for x/y change calculation we need degrees that start to the right (normal circle)
-    # take cart orientation and cart move direction into account
-    # cart orientation 0 is straight up
-    trigDegrees = evalTrigDegrees(orientation, moveDirection)
-    if trigDegrees is not None:
-        _cartLocationX = _moveStartX + int(distance * np.cos(np.radians(trigDegrees)))
-        _cartLocationY = _moveStartY + int(distance * np.sin(np.radians(trigDegrees)))
-    #log(f"updateCartLocation, from X,Y {_moveStartX},{_moveStartY}, dist: {distance}, ori: {orientation}, dir: {moveDirection}, deg: {trigDegrees}, x/y: {_cartLocationX}/{_cartLocationY}")
-
-
-def calculateCartTargetLocation(orientation, distance, moveDirection):
-
-    global _cartTargetLocationX, _cartTargetLocationY
-
-    # for x/y change calculation we need degrees that start to the right (normal circle)
-    # take cart orientation and cart move direction into account
-    # cart orientation 0 is straight up
-    trigDegrees = evalTrigDegrees(orientation, moveDirection)
-    if trigDegrees is not None:
-        _cartTargetLocationX = _moveStartX + int(distance * np.cos(np.radians(trigDegrees)))
-        _cartTargetLocationY = _moveStartY + int(distance * np.sin(np.radians(trigDegrees)))
-
-    print(f"target x/y: {_cartTargetLocationX:2f} / {_cartTargetLocationY:2f}")
-
-def getCartLocation():
-    return _cartLocationX, _cartLocationY
-
-
-def setImuOrientation(new):
-
-    global _imuOrientation
-
-    _imuOrientation = round(new)
-
-
-def getCartOrientation():
-    return (_imuOrientation + _cartOrientationCorrection) % 360
-
-
-def getMoveStart():
-    return _moveStartX, _moveStartY
-
-
-def getRemainingRotation():
-    d = abs(getCartOrientation() - _targetOrientation) % 360
-    return 360 - d if d > 180 else d
-
-
-def getLastBatteryCheckTime():
-    return _lastBatteryCheckTime
-
-
-def setLastBatteryCheckTime(newTime):
-    global _lastBatteryCheckTime
-
-    _lastBatteryCheckTime = newTime
-
-
-def getBatteryStatus():
-    return _batteryStatus
-
-
-def updateBatteryStatus():
-    global _batteryStatus
-
-    _batteryStatus = psutil.sensors_battery()
-    setLastBatteryCheckTime(time.time())
-
-    # inform navManager about low battery
-    if _batteryStatus.percent < 25:
-        msg = f"low battery: {_batteryStatus.percent:.0f} percent"
-        if standAloneMode or navManager is None:
-            log(msg)
-        else:
-            navManager.root.lowBattery("cart - " + msg)
+        return (orientation + moveDegrees) % 360  # make 0 degrees pointing to the right
 
 
 def getSensorName(sensorID):
-    return ["", "VL nah", "VL fern", "VR nah", "VR fern", "left", "right", "HL nah", "HL fern", "HR nah", "HL fern"][
-        sensorID + 1]
+    return ["", "FL near", "FL far", "FR near", "FR far", "left", "right", "BL near", "BL far", "BR near", "BL far"][sensorID + 1]
 
 
-def getVoltage12V():
-    return _mVolts12V
-
-
-def setVoltage12V(value):
-    global _mVolts12V
-
-    _mVolts12V = value
-
-
-def saveCartLocation():
-    # Saving the objects:
-    cartData = {'posX': int(_cartLocationX), 'posY': int(_cartLocationY), 'orientation': getCartOrientation()}
-    filename = f"cartLocation.json"
-    with open(filename, "w") as write_file:
-        json.dump(cartData, write_file)
-
-
-def loadCartLocation():
+def signedAngleDifference(start, end):
     """
-    we load the cart location from the file system
-    as the carts imu is reset with each start of the cart the carts orientation might be 0
-    set an orientationCorrection value to account for this
-    :return:
+    calculate angle difference in range -180 .. 180 between start and end degrees in range 0 .. 360
     """
-    global _cartLocationX, _cartLocationY, _cartOrientationCorrection
-
-    # Getting back the last saved cart data
-    filename = f"cartLocation.json"
-    if os.path.exists(filename):
-        with open(filename, "r") as read_file:
-            cartData = json.load(read_file)
-
-        _cartLocationX = cartData['posX']
-        _cartLocationY = cartData['posY']
-        lastOrientation = cartData['orientation']
-        _cartOrientationCorrection = (lastOrientation - _imuOrientation) % 360
-
-    else:
-        _cartLocationX = 0
-        _cartLocationY = 0
-        _cartOrientation = 0
-        _cartOrientationCorrection = 0
-
-    print(f"loadCartLocation, cartOrientationCorrection: {_cartOrientationCorrection}")
-
-
-def setMoveDirection(direction):
-    global _moveDirection
-
-    _moveDirection = direction
-
+    diff = end - start
+    d = abs(diff) % 360
+    value = 360 - d if d > 180 else d
+    sign = 1 if (0 <= diff <= 180) or (-180 >= diff >= -360) else -1
+    return sign * value
 
