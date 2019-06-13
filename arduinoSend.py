@@ -8,11 +8,9 @@ import watchDog
 ########################################################################
 ########################################################################
 def sendConfigValues():
-    msg = 'a' + str(config.SHORT_RANGE_MIN).zfill(2) \
-          + str(config.SHORT_RANGE_MAX).zfill(2) \
-          + str(config.LONG_RANGE_MIN).zfill(2) \
-          + str(config.LONG_RANGE_MAX).zfill(2) \
-          + str(config.delayBetweenDistanceMeasurements).zfill(2) \
+    msg = 'a,' + str(config.FLOOR_MAX_OBSTACLE).zfill(2) + "," \
+          + str(config.FLOOR_MAX_ABYSS).zfill(2) + "," \
+          + str(config.delayBetweenDistanceMeasurements).zfill(2) + "," \
           + str(config.finalDockingMoveDistance).zfill(2)
     config.arduino.write(bytes(msg + '\n', 'ascii'))
     time.sleep(0.5)
@@ -22,12 +20,14 @@ def sendConfigValues():
     time.sleep(0.5)     # problems with overwriting message in Arduino
 
     # distance sensor corrections
+    ''' try with auto-calibrate for the moment
     msg = f"c"
     for corr in config.distanceSensorCorrections:
         msg += f",{corr:+03d}"
     config.arduino.write(bytes(msg + '\n', 'ascii'))
     config.log(f"distanceSensorCorrections sent: {msg}")
     time.sleep(0.5)
+    '''
 
     # motor speed unifyers, FRONT_RIGHT, FRONT_LEFT, BACK_RIGHT, BACK_LEFT
     msg = f"d,104,102,097,088"
@@ -45,7 +45,7 @@ def powerKinect(newState):
     config.log(f"kinect power command sent: {powerMsg}")
 
 
-def sendMoveCommand(moveDirection: 'config.Direction', speed, distanceMm, accuracy=50, kinectMonitoring=True):
+def sendMoveCommand(moveDirection: 'config.Direction', speed, distanceMm, protected=True):
     '''
     send move command to cart
     distance calculation is based on rotary encoder on one of the weels for forward/backward moves
@@ -56,7 +56,7 @@ def sendMoveCommand(moveDirection: 'config.Direction', speed, distanceMm, accura
     # e.g. forward, speed=180, distance=100 mm, max duration=5 s: 1,0,180,0100,0005
 
     obstacleDistance = distanceMm
-    if kinectMonitoring:
+    if protected:
         if moveDirection == config.Direction.FORWARD and config.kinectConnection is not None:
             numTries = 1
             while numTries <= 2:
@@ -90,8 +90,8 @@ def sendMoveCommand(moveDirection: 'config.Direction', speed, distanceMm, accura
 
     cartControl.setMovementBlocked(False)
     cartControl.setCartMoving(True, time.time() + durationLimited + 2000)
-
-    moveMsg = f"1,{moveDirection.value},{speed:03.0f},{distanceMmLimited:04.0f},{durationLimited:05.0f}"
+    flagProtected = 1 if protected else 0
+    moveMsg = f"1,{moveDirection.value},{speed:03.0f},{distanceMmLimited:04.0f},{durationLimited:05.0f},{flagProtected}"
     config.arduino.write(bytes(moveMsg + "\n", 'ascii'))
     config.log(
         f"Send move {moveMsg}, speed: {speed:.0f}, distance: {distanceMmLimited:.0f}, duration: {durationLimited:.0f}")
@@ -110,13 +110,13 @@ def sendRotateCommand(relAngle, speed=200):
     # arduinoReceive.arduino.write(bytes(msg + '\n', 'ascii'))
 
     if relAngle > 0:  # rotate counterclock
-        msg = f"2,{abs(relAngle):03.0f},{speed:03.0f}"
+        msg = f"2,{abs(relAngle):03.0f},{speed:03.0f},1"
         config.log(f"Send rotate counterclock {msg}")
         config.arduino.write(bytes(msg + '\n', 'ascii'))
 
     # command 3
     if relAngle < 0:
-        msg = f"3,{abs(relAngle):03.0f},{speed:03.0f}"
+        msg = f"3,{abs(relAngle):03.0f},{speed:03.0f},1"
         config.log(f"Send rotate clockwise {msg}")
         config.arduino.write(bytes(msg + '\n', 'ascii'))
 
@@ -163,7 +163,7 @@ def setVerbose(newState: bool):
         if newState:
             msg = b'v,1' + b'\n'
         else:
-            msg = b'v,0' + b'n'
+            msg = b'v,0' + b'\n'
         config.arduino.write(msg)
     except:
         pass

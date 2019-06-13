@@ -19,8 +19,8 @@ todo: pass these values from cartControl to the Arduino on startup
 
 LINE_SCALE_SHORT = 2.0
 LINE_SCALE_LONG = 1.5
-SHORT_ARC_BOX = (config.SHORT_RANGE_MAX + config.SHORT_RANGE_MIN) / 2 * LINE_SCALE_SHORT
-LONG_ARC_BOX = (config.LONG_RANGE_MAX + config.LONG_RANGE_MIN) / 2 * LINE_SCALE_LONG
+SHORT_ARC_BOX = (15 + config.FLOOR_MAX_OBSTACLE) / 2 * LINE_SCALE_SHORT
+LONG_ARC_BOX = (15 + config.FLOOR_MAX_OBSTACLE) / 2 * LINE_SCALE_LONG
 
 # use named tupels to make the base positions available
 # e.g.  reference by: servos[0].id
@@ -34,13 +34,13 @@ sensors.append(location(id=0, x=X, y=Y,
                         x1=X - SHORT_ARC_BOX, y1=Y - SHORT_ARC_BOX,
                         x2=X + SHORT_ARC_BOX, y2=Y + SHORT_ARC_BOX,
                         arcFrom=0, arcLength=180,
-                        arcWidth=(config.SHORT_RANGE_MAX - config.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
+                        arcWidth=(15 - config.FLOOR_MAX_OBSTACLE) * LINE_SCALE_SHORT))
 Y = CANV_HEIGHT / 4 - 40
 sensors.append(location(id=1, x=X, y=Y,
                         x1=X - LONG_ARC_BOX, y1=Y - LONG_ARC_BOX,
                         x2=X + LONG_ARC_BOX, y2=Y + LONG_ARC_BOX,
                         arcFrom=0, arcLength=180,
-                        arcWidth=(config.LONG_RANGE_MAX - config.LONG_RANGE_MIN) * LINE_SCALE_LONG))
+                        arcWidth=(15 - config.FLOOR_MAX_OBSTACLE) * LINE_SCALE_LONG))
 
 # front right
 X = CANV_WIDTH / 4 * 3
@@ -49,13 +49,13 @@ sensors.append(location(id=2, x=X, y=Y,
                         x1=X - SHORT_ARC_BOX, y1=Y - SHORT_ARC_BOX,
                         x2=X + SHORT_ARC_BOX, y2=Y + SHORT_ARC_BOX,
                         arcFrom=0, arcLength=180,
-                        arcWidth=(config.SHORT_RANGE_MAX - config.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
+                        arcWidth=(15 - config.FLOOR_MAX_OBSTACLE) * LINE_SCALE_SHORT))
 Y = CANV_HEIGHT / 4 - 40
 sensors.append(location(id=3, x=X, y=Y,
                         x1=X - LONG_ARC_BOX, y1=Y - LONG_ARC_BOX,
                         x2=X + LONG_ARC_BOX, y2=Y + LONG_ARC_BOX,
                         arcFrom=0, arcLength=180,
-                        arcWidth=(config.LONG_RANGE_MAX - config.LONG_RANGE_MIN) * LINE_SCALE_LONG))
+                        arcWidth=(15 - config.FLOOR_MAX_OBSTACLE) * LINE_SCALE_LONG))
 
 # left
 X = CANV_WIDTH / 4
@@ -64,7 +64,7 @@ sensors.append(location(id=4, x=X, y=Y,
                         x1=X - SHORT_ARC_BOX, y1=Y - SHORT_ARC_BOX,
                         x2=X + SHORT_ARC_BOX, y2=Y + SHORT_ARC_BOX,
                         arcFrom=90, arcLength=180,
-                        arcWidth=(config.SHORT_RANGE_MAX - config.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
+                        arcWidth=(15 - config.FLOOR_MAX_OBSTACLE) * LINE_SCALE_SHORT))
 
 # right
 X = CANV_WIDTH / 4 * 3
@@ -73,7 +73,7 @@ sensors.append(location(id=5, x=X, y=Y,
                         x1=X - SHORT_ARC_BOX, y1=Y - SHORT_ARC_BOX,
                         x2=X + SHORT_ARC_BOX, y2=Y + SHORT_ARC_BOX,
                         arcFrom=270, arcLength=180,
-                        arcWidth=(config.SHORT_RANGE_MAX - config.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
+                        arcWidth=(15 - config.FLOOR_MAX_OBSTACLE) * LINE_SCALE_SHORT))
 
 # back left
 X = CANV_WIDTH / 4
@@ -82,13 +82,13 @@ sensors.append(location(id=6, x=X, y=Y,
                         x1=X - SHORT_ARC_BOX, y1=Y - SHORT_ARC_BOX,
                         x2=X + SHORT_ARC_BOX, y2=Y + SHORT_ARC_BOX,
                         arcFrom=180, arcLength=180,
-                        arcWidth=(config.SHORT_RANGE_MAX - config.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
+                        arcWidth=(15 - config.FLOOR_MAX_OBSTACLE) * LINE_SCALE_SHORT))
 Y = CANV_HEIGHT / 4 * 3 + 40
 sensors.append(location(id=7, x=X, y=Y,
                         x1=X - LONG_ARC_BOX, y1=Y - LONG_ARC_BOX,
                         x2=X + LONG_ARC_BOX, y2=Y + LONG_ARC_BOX,
                         arcFrom=180, arcLength=180,
-                        arcWidth=(config.LONG_RANGE_MAX - config.LONG_RANGE_MIN) * LINE_SCALE_LONG))
+                        arcWidth=(15 - config.FLOOR_MAX_OBSTACLE) * LINE_SCALE_LONG))
 
 # back right
 X = CANV_WIDTH / 4 * 3
@@ -97,14 +97,14 @@ sensors.append(location(id=8, x=X, y=Y,
                         x1=X - SHORT_ARC_BOX, y1=Y - SHORT_ARC_BOX,
                         x2=X + SHORT_ARC_BOX, y2=Y + SHORT_ARC_BOX,
                         arcFrom=180, arcLength=180,
-                        arcWidth=(config.SHORT_RANGE_MAX - config.SHORT_RANGE_MIN) * LINE_SCALE_SHORT))
+                        arcWidth=(15 - config.FLOOR_MAX_OBSTACLE) * LINE_SCALE_SHORT))
 
 Y = CANV_HEIGHT / 4 * 3 + 40
 sensors.append(location(id=9, x=X, y=Y,
                         x1=X - LONG_ARC_BOX, y1=Y - LONG_ARC_BOX,
                         x2=X + LONG_ARC_BOX, y2=Y + LONG_ARC_BOX,
                         arcFrom=180, arcLength=180,
-                        arcWidth=(config.LONG_RANGE_MAX - config.LONG_RANGE_MIN) * LINE_SCALE_LONG))
+                        arcWidth=(15 - config.FLOOR_MAX_OBSTACLE) * LINE_SCALE_LONG))
 
 # global variables
 gui = None
@@ -135,13 +135,13 @@ class manualControl:
 
         # informational elements
         ##########################
-        self.lblDistanceObstacle = tk.Label(frame, text="distance to obstacle: ")
+        self.lblDistanceObstacle = tk.Label(frame, text="obstacle: ")
         self.lblDistanceObstacle.grid(row=20, column=0, sticky=tk.E)
 
         self.lblDistanceObstacleValue = tk.Label(frame, text=" ", fg="white", bg="red")
         self.lblDistanceObstacleValue.grid(row=20, column=1)
 
-        self.lblDistanceAbyss = tk.Label(frame, text="max distance value: ")
+        self.lblDistanceAbyss = tk.Label(frame, text="abyss: ")
         self.lblDistanceAbyss.grid(row=25, column=0, sticky=tk.E)
 
         self.lblDistanceAbyssValue = tk.Label(frame, text=" ", fg="white", bg="red")
@@ -221,8 +221,8 @@ class manualControl:
         self.separator4 = tk.Frame(frame, height=3, bd=2, relief=tk.SUNKEN)
         self.separator4.grid(row=90, column=0, columnspan=2, pady=10, sticky="we")
 
-        self.sensorTestChoices = ["FLnear", "FLfar", "FRnear", "FRfar", "Lnear", "Rnear", "BLnear","BLfar","BRnear", "BRfar"]
-        defaultSensorTest = "FLnear"
+        self.sensorTestChoices = ["front left", "front center", "front right", "back left", "back center", "back right", "left front","right front","left back", "right back"]
+        defaultSensorTest = "front left"
         self.sensorTest = self.sensorTestChoices.index(defaultSensorTest)
 
         testSensor = tk.StringVar(gui)
@@ -283,15 +283,9 @@ class manualControl:
                                    start=sensor.arcFrom, extent=sensor.arcLength, style=tk.ARC, width=sensor.arcWidth,
                                    outline="snow3")
 
-            if s.get('range') == 'long':
-                lengthFactor = LINE_SCALE_LONG
-                minRange = config.LONG_RANGE_MIN
-                maxRange = config.LONG_RANGE_MAX
-            else:
-                lengthFactor = LINE_SCALE_SHORT
-                minRange = config.SHORT_RANGE_MIN
-                maxRange = config.SHORT_RANGE_MAX
-
+            minRange = 15 - config.FLOOR_MAX_OBSTACLE - 5
+            maxRange = 15 + config.FLOOR_MAX_OBSTACLE + 5
+            lengthFactor = 1
             for k in range(config.NUM_MEASUREMENTS_PER_SCAN):
 
                 # line color depends on distance value
@@ -432,13 +426,13 @@ class manualControl:
         arduinoSend.sendRotateCommand(relAngle, 150)
         self.w.update_idletasks()
 
-    def updateDistanceSensorObstacle(self, distance, sensorID):
-        info = f"{distance}, {config.getSensorName(sensorID)}"
+    def updateDistanceSensorObstacle(self, distance, sensorName):
+        info = f"{distance}, {sensorName}"
         self.lblDistanceObstacleValue.configure(text=info)
         self.w.update_idletasks()
 
-    def updateDistanceSensorAbyss(self, distance, sensorID):
-        info = f"{distance}, {config.getSensorName(sensorID)}"
+    def updateDistanceSensorAbyss(self, distance, sensorName):
+        info = f"{distance}, {sensorName}"
         self.lblDistanceAbyssValue.configure(text=info)
         self.w.update_idletasks()
 

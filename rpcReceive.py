@@ -81,10 +81,10 @@ class rpcListener(rpyc.Service):
     ############################## common routines for clients
 
 
-    def exposed_move(self, direction: int, speed, distance):
+    def exposed_move(self, direction: int, speed, distance, protected:bool=True):
         moveDirection = config.Direction(direction)
         config.log(f"exposed_move , direction: {moveDirection}, speed: {speed}, distance: {distance}", publish=False)
-        arduinoSend.sendMoveCommand(moveDirection, speed, distance)
+        arduinoSend.sendMoveCommand(moveDirection, speed, distance, protected)
         return True
 
 
@@ -97,9 +97,9 @@ class rpcListener(rpyc.Service):
 
 
     def exposed_stop(self):
-        config.log("stop received", publish=False)
         gui.controller.stopCart()
         return True
+        config.log("stop received", publish=False)
 
 
     def exposed_setCartLocation(self, x, y):

@@ -8,29 +8,18 @@ from enum import Enum, unique
 import logging
 
 # configuration values for cart arduino infrared distance limits
-SHORT_RANGE_MIN = 10
-SHORT_RANGE_MAX = 20
-LONG_RANGE_MIN = 14
-LONG_RANGE_MAX = 34
+FLOOR_MAX_OBSTACLE = 3  # cm
+FLOOR_MAX_ABYSS = 3     # cm
 delayBetweenDistanceMeasurements = 2    # value 1 caused unstable analog read values from distance sensor (2.4.2019)
-finalDockingMoveDistance = 8            # distance to move forward after seeing activated docking switch
+finalDockingMoveDistance = 12            # distance to move forward after seeing activated docking switch
 
-"""
-static sensorDefinition sensorDefinitions[DISTANCE_SENSORS_COUNT]{
-	{ VL_NAH,  "VL_NAH ", A21, NAH, true, A0, VL, -1 },
-	{ VL_FERN, "VL_FERN", A21, FERN, true, A2, VL, -3 },
-	{ VR_NAH,  "VR_NAH ", A41, NAH, true, A1, VR, 4 },
-	{ VR_FERN, "VR_FERN", A21, FERN, true, A3, VR, -5 },
-	{ LM_NAH,  "LM_NAH ", A21, NAH, true, A13, LM, -1 },
-	{ RM_NAH,  "RM_NAH ", A21, NAH, true, A7, RM, 0 },
-	{ HL_NAH,  "HL_NAH ", A21, NAH, true, A8, HL, 2 },
-	{ HL_FERN, "HL_FERN", A21, FERN, true, A9, HL, 0 },
-	{ HR_NAH,  "HR_NAH ", A21, NAH, true, A10, HR, 3 },
-	{ HR_FERN, "HR_FERN", A21, FERN, true, A11, HR, 3 }
-"""
-#                              FL    FR   L  R   BL    BR
-#                             n  f  n  f  n  n  n  f  n  f
-distanceSensorCorrections = [-3,-5, 4,-5, 4, 3, 5, 8, 5, 0]
+cartDocked = False
+
+# should be set by auto calibraiton in cart
+#                              FL     FR    L   R    BL     BR
+#                             n  f   n  f   n   n   n  f   n  f
+#distanceSensorCorrections = [-1,-5,  4,-5,  4,  3,  5, 8,  5, -1]
+
 
 
 ##################################################################
@@ -69,56 +58,56 @@ SPEED_FACTOR_DIAGONAL = 0.63
 NUM_DISTANCE_SENSORS = 10
 NUM_MEASUREMENTS_PER_SCAN = 11
 
-distanceList = np.zeros((NUM_DISTANCE_SENSORS, NUM_MEASUREMENTS_PER_SCAN))
+distanceList = np.zeros((NUM_DISTANCE_SENSORS, NUM_MEASUREMENTS_PER_SCAN), dtype=np.int16)
 obstacleInfo = []
 
 distanceSensors = []
-# VL nah
+# front left
 distanceSensors.append(
-    {'sensorID': 0, 'direction': 'forward', 'position': 'left', 'range': 'short', 'newValuesShown': False,
+    {'sensorID': 0, 'direction': 'forward', 'position': 'left', 'newValuesShown': False,
      'timestamp': time.time(), 'valueIndex': (0, 0), 'installed': True, 'servoIndex': 0, 'color': 'red',
      'rotation': -180})
-# VL fern
+# front center
 distanceSensors.append(
-    {'sensorID': 1, 'direction': 'forward', 'position': 'left', 'range': 'long', 'newValuesShown': False,
+    {'sensorID': 1, 'direction': 'forward', 'position': 'center', 'newValuesShown': False,
      'timestamp': time.time(), 'valueIndex': (0, 1), 'installed': True, 'servoIndex': 0, 'color': 'blue',
      'rotation': -180})
-# VR nah
+# front right
 distanceSensors.append(
-    {'sensorID': 2, 'direction': 'forward', 'position': 'right', 'range': 'short', 'newValuesShown': False,
+    {'sensorID': 2, 'direction': 'forward', 'position': 'right', 'newValuesShown': False,
      'timestamp': time.time(), 'valueIndex': (1, 0), 'installed': True, 'servoIndex': 1, 'color': 'red',
      'rotation': -180})
-# VR fern
+# back left
 distanceSensors.append(
-    {'sensorID': 3, 'direction': 'forward', 'position': 'right', 'range': 'long', 'newValuesShown': False,
+    {'sensorID': 3, 'direction': 'back', 'position': 'left', 'newValuesShown': False,
      'timestamp': time.time(), 'valueIndex': (1, 1), 'installed': True, 'servoIndex': 1, 'color': 'blue',
      'rotation': -180})
-# LM nah
+# back center
 distanceSensors.append(
-    {'sensorID': 4, 'direction': 'left', 'position': 'middle', 'range': 'short', 'newValuesShown': False,
+    {'sensorID': 4, 'direction': 'back', 'position': 'center', 'newValuesShown': False,
      'timestamp': time.time(), 'valueIndex': (2, 0), 'installed': True, 'servoIndex': 2, 'color': 'red',
      'rotation': 90})
-# RM nah
+# back right
 distanceSensors.append(
-    {'sensorID': 5, 'direction': 'right', 'position': 'middle', 'range': 'short', 'newValuesShown': False,
+    {'sensorID': 5, 'direction': 'back', 'position': 'right', 'newValuesShown': False,
      'timestamp': time.time(), 'valueIndex': (2, 1), 'installed': True, 'servoIndex': 2, 'color': 'red',
      'rotation': -90})
-# HL nah
+# left side front
 distanceSensors.append(
-    {'sensorID': 6, 'direction': 'backward', 'position': 'left', 'range': 'short', 'newValuesShown': False,
+    {'sensorID': 6, 'direction': 'left', 'position': 'front', 'newValuesShown': False,
      'timestamp': time.time(), 'valueIndex': (3, 0), 'installed': True, 'servoIndex': 3, 'color': 'red', 'rotation': 0})
-# HL fern
+# right side front
 distanceSensors.append(
-    {'sensorID': 7, 'direction': 'backward', 'position': 'left', 'range': 'long', 'newValuesShown': False,
+    {'sensorID': 7, 'direction': 'right', 'position': 'front', 'newValuesShown': False,
      'timestamp': time.time(), 'valueIndex': (3, 1), 'installed': True, 'servoIndex': 3, 'color': 'blue',
      'rotation': 0})
-# HR nah
+# left side back
 distanceSensors.append(
-    {'sensorID': 8, 'direction': 'backward', 'position': 'right', 'range': 'short', 'newValuesShown': False,
+    {'sensorID': 8, 'direction': 'left', 'position': 'back', 'newValuesShown': False,
      'timestamp': time.time(), 'valueIndex': (3, 0), 'installed': True, 'servoIndex': 4, 'color': 'red', 'rotation': 0})
-# HR fern
+# right side back
 distanceSensors.append(
-    {'sensorID': 9, 'direction': 'backward', 'position': 'right', 'range': 'long', 'newValuesShown': False,
+    {'sensorID': 9, 'direction': 'right', 'position': 'back', 'newValuesShown': False,
      'timestamp': time.time(), 'valueIndex': (3, 1), 'installed': True, 'servoIndex': 4, 'color': 'blue',
      'rotation': 0})
 
@@ -249,7 +238,7 @@ def evalTrigDegrees(orientation, moveDirection: Direction):
 
 
 def getSensorName(sensorID):
-    return ["", "FL near", "FL far", "FR near", "FR far", "left", "right", "BL near", "BL far", "BR near", "BL far"][sensorID + 1]
+    return ["front left", "front center", "front left", "back left", "back center", "back right", "left front", "right front", "left back", "right back"][sensorID ]
 
 
 def signedAngleDifference(start, end):

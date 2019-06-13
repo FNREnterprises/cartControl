@@ -49,7 +49,8 @@ def cartInit():
         raise SystemExit()
 
     setMovementBlocked(False)
-    arduinoSend.setVerbose(False)
+
+    arduinoSend.setVerbose(True)
 
     # start cart control gui and initialization
     guiThread = threading.Thread(target=gui.startGui, args={})
@@ -90,7 +91,7 @@ def updateCartLocation(magnitude, moveDirection, final=False):
     :param moveDirection:
     :return:
     """
-    if magnitude == 0:
+    if not final and magnitude == 0:
         return
 
     if moveDirection not in [config.Direction.ROTATE_LEFT, config.Direction.ROTATE_RIGHT]:
@@ -178,23 +179,24 @@ def setVoltage12V(value):
 def updateDistances(Values):
     """
     cart arduino msg A1 sends measured distance values
-    # !A1,<sensorID>,<ANZ_MESSUNGEN_PRO_SCAN>,[ANZ_MESSUNGEN_PRO_SCAN<value>,]
+    # !A1,<sensorID>,<ANZ_MESSUNGEN_PRO_SCAN>,<servoStep>,[ANZ_MESSUNGEN_PRO_SCAN<value>,]
     :param Values:
     :return:
     """
-    sensorID = Values[0]
-    numValues = Values[1]
+    sensorID = Values[1]
+    numValues = Values[2]
+    servoStep = Values[3]
 
-    config.log(f"updateDistances, sensor: {config.getSensorName(sensorID)} {Values[2:-1]}", publish=False)
+    config.log(f"updateDistances, sensor: {config.getSensorName(sensorID)} {Values[4:-1]}", publish=False)
 
     for i in range(numValues):
         try:
-            config.distanceList[sensorID][i] = float(Values[2 + i])
+            config.distanceList[sensorID][i] = round(float(Values[4 + i]))
         except ValueError:
-            config.distanceList[sensorID][i] = 0.0
+            config.distanceList[sensorID][i] = 0
         except IndexError:
-            config.distanceList[sensorID][i] = 0.0
-            config.log(f"something is wrong with !A1 message from cart")
+            config.distanceList[sensorID][i] = 0
+            config.log(f"something is wrong with !A1 message from cart: {Values}")
 
     config.distanceSensors[sensorID]['timestamp'] = time.time()
     config.distanceSensors[sensorID]['newValuesShown'] = False
@@ -250,7 +252,11 @@ def setMovementBlocked(new):
 
 
 def getMovementBlocked():
-    return config._movementBlocked, config._timeMovementBlocked
+    return config._movementBlocked
+
+
+def getMovementBlockedStartTime():
+    return config._timeMovementBlocked
 
 
 def setRequestedCartSpeed(speed):
