@@ -15,7 +15,11 @@ import arduinoSend
 import rpcReceive
 import rpcSend
 import gui
+import depthImage
+import findObstacles
 
+
+standAloneMode = False  # False -> slave mode,  True -> standalone mode
 
 CART_PORT = 20003
 
@@ -50,7 +54,7 @@ def cartInit():
 
     setMovementBlocked(False)
 
-    arduinoSend.setVerbose(True)
+    arduinoSend.setVerbose(False)
 
     # start cart control gui and initialization
     guiThread = threading.Thread(target=gui.startGui, args={})
@@ -65,6 +69,8 @@ def cartInit():
     arduinoSend.requestCartOrientation()
     time.sleep(0.1)
     loadCartLocation()
+
+    findObstacles.initObstacleDetection()
 
     timeoutReady = time.time() + 5
     while time.time() < timeoutReady:
@@ -112,7 +118,7 @@ def updateCartLocation(magnitude, moveDirection, final=False):
 
 
 def getCartYaw():
-    return (config.imuDegrees + config.imuDegreesCorrection) % 360
+    return (config.platformImuYaw + config.platformImuYawCorrection) % 360
 
 
 def calculateCartTargetLocation(orientation, distance, moveDirection: 'config.Direction'):
@@ -122,9 +128,9 @@ def calculateCartTargetLocation(orientation, distance, moveDirection: 'config.Di
     # cart orientation 0 is straight up
     trigDegrees = config.evalTrigDegrees(orientation, moveDirection)
     if trigDegrees is not None:
-        config._cartTargetLocationX = config._moveStartX + int(distance * np.cos(np.radians(trigDegrees)))
-        config._cartTargetLocationY = config._moveStartY + int(distance * np.sin(np.radians(trigDegrees)))
-        config.log(f"move - from: {config.cartLocationX:.0f} / {config.cartLocationY:.0f}, orientation: {orientation}, moveDir: {moveDirection}, deg: {trigDegrees:.0f}, dist: {distance}, to: {config._cartTargetLocationX:.0f} / {config._cartTargetLocationY:.0f}")
+        config.cartTargetLocationX = config._moveStartX + int(distance * np.cos(np.radians(trigDegrees)))
+        config.cartTargetLocationY = config._moveStartY + int(distance * np.sin(np.radians(trigDegrees)))
+        config.log(f"move - from: {config.cartLocationX:.0f} / {config.cartLocationY:.0f}, orientation: {orientation}, moveDir: {moveDirection}, deg: {trigDegrees:.0f}, dist: {distance}, to: {config.cartTargetLocationX:.0f} / {config.cartTargetLocationY:.0f}")
 
     else:
         config.log(
@@ -234,15 +240,15 @@ def loadCartLocation():
         config.cartLocationX = cartData['posX']
         config.cartLocationY = cartData['posY']
         lastYaw = cartData['orientation']
-        config.imuDegreesCorrection = (lastYaw - config.imuDegrees) % 360
+        config.platformImuYawCorrection = (lastYaw - config.platformImuYaw) % 360
 
     else:
         config.cartLocationX = 0
         config.cartLocationY = 0
         config._cartOrientation = 0
-        config.imuDegreesCorrection = 0
+        config.platformImuYawCorrection = 0
 
-    config.log(f"imuYaw: {config.imuDegrees}, cartYawCorrection: {config.imuDegreesCorrection}, roll: {config._imuRoll}, pitch: {config._imuPitch}, cartX: {config.cartLocationX}, cartY: {config.cartLocationY}, lastYaw: {lastYaw}")
+    config.log(f"imuYaw: {config.platformImuYaw}, cartYawCorrection: {config.platformImuYawCorrection}, roll: {config.platformImuRoll}, pitch: {config.platformImuPitch}, cartX: {config.cartLocationX}, cartY: {config.cartLocationY}, lastYaw: {lastYaw}")
 
 
 def setMovementBlocked(new):
@@ -326,7 +332,8 @@ if __name__ == '__main__':
     config.log("cartControl started")
 
 
-    if not config.standAloneMode:
+
+    if not standAloneMode:
 
         # start arduino thread
         config.log(f"start cart initialization thread")
@@ -334,14 +341,16 @@ if __name__ == '__main__':
         startupThread.setName("cartInit")
         startupThread.start()
 
-        # TODO: currently always have kinect power on, could be improved
-        time.sleep(2)
+        time.sleep(4)
         while config.arduinoStatus == 0:
             config.log(f"something is blocking the connection with the arduino, another instance of cartControl active?")
             time.sleep(1)
 
-        config.log(f"turn on kinect power")
-        arduinoSend.powerKinect(True)
+        # init D415 cam
+        config.log(f"init D415 cam")
+        depthImage.initD415()
+        #config.log(f"turn on kinect power")
+        #arduinoSend.powerKinect(True)
 
         # start communication watchdog thread
         config.log(f"start rpyc communication watchdog")

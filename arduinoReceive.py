@@ -132,7 +132,7 @@ def readMessages():
             elif msgID == "!A5":  # "cart stopped":
                 # !A5,<orientation>,<distance moved>,<moveDirection>,<reason>
                 items = recv.split(",")
-                config.imuDegrees = round(float(items[1]))
+                config.platformImuYaw = round(float(items[1]))
                 distanceMoved = int(items[2])
                 moveDirection = config.Direction(int(items[3]))
                 reason = items[4]
@@ -163,7 +163,7 @@ def readMessages():
                 # !Aa,<imuYaw>, <distance moved in mm>, <moveDirection>
                 #config.log(f"!Aa, cartUpdate: {recv}", publish=False)
                 items = recv.split(",")
-                config.imuDegrees = round(float(items[1]))
+                config.platformImuYaw = round(float(items[1]))
                 distanceMoved = round(float(items[2]))
                 moveDirection = config.Direction(int(items[3]))
 
@@ -175,14 +175,21 @@ def readMessages():
                 cartControl.updateCartLocation(magnitude, moveDirection, final=False)
 
 
-            elif msgID == "!Ab":  # bno055 sensor update:
+            elif msgID == "!Ab":  # bno055 platform sensor update:
                 # !Ab,<yaw>,<roll>, <pitch>
                 items = recv.split(",")
-                config.imuDegrees = round(float(items[1]))
-                config._imuRoll = float(items[2])
-                config._imuPitch = float(items[3])
-                #config.log(f"!Ab, imuYaw: {config.imuDegrees}, imuRoll: {config._imuRoll}, imuPitch: {config._imuPitch}", publish=False)
+                config.platformImuYaw = 360 - round(float(items[1]) / 1000.0)
+                config.platformImuRoll = float(items[2]) / 1000.0
+                config.platformImuPitch = float(items[3]) / 1000.0
+                config.log(f"!Ab, platformImu yaw: {config.platformImuYaw}, roll: {config.platformImuRoll}, pitch: {config.platformImuPitch}", publish=False)
 
+            elif msgID == "!Ac":  # bno055 head sensor update:
+                # !Ab,<milliYaw>,<milliRoll>, <milliPitch>
+                items = recv.split(",")
+                config.headImuYaw = round(float(items[1]) / 1000.0)
+                config.headImuRoll = float(items[2]) / 1000.0
+                config.headImuPitch = float(items[3]) / 1000.0
+                config.log(f"!Ac, headImu, yaw: {config.headImuYaw}, roll: {config.headImuRoll}, pitch: {config.headImuPitch}", publish=False)
 
             elif msgID == "!A6":  # cart docked
                 # Arduino triggers the relais for loading batteries through the docking contacts
@@ -225,21 +232,21 @@ def readMessages():
                     newOrientation = cartControl.getCartYaw()
 
                 # test for change of orientation
-                if config.imuDegrees != newYaw:
-                    config.imuDegrees = newYaw
+                if config.platformImuYaw != newYaw:
+                    config.platformImuYaw = newYaw
                     # cartGlobal.log(f"new cart orientation: {newOrientation}")
 
                     # if cart is in rotation no blocking exists
                     if cartControl.getMovementBlocked():
                         cartControl.setMovementBlocked(False)
 
-                if config._imuRoll != newRoll:
-                    config._imuRoll = newRoll
-                    config.log(f"new roll value: {config._imuRoll}")
+                if config.platformImuRoll != newRoll:
+                    config.platformImuRoll = newRoll
+                    config.log(f"new roll value: {config.platformImuRoll}")
 
-                if config._imuPitch != newPitch:
-                    config._imuPitch = newPitch
-                    config.log(f"new pitch value: {config._imuPitch}")
+                if config.platformImuPitch != newPitch:
+                    config.platformImuPitch = newPitch
+                    config.log(f"new pitch value: {config.platformImuPitch}")
 
                 # no new orientation, check for blocked movement and stop cart
                 else:

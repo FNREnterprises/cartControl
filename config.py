@@ -7,9 +7,11 @@ import numpy as np
 from enum import Enum, unique
 import logging
 
+
+
 # configuration values for cart arduino infrared distance limits
 FLOOR_MAX_OBSTACLE = 3  # cm
-FLOOR_MAX_ABYSS = 3     # cm
+FLOOR_MAX_ABYSS = 4     # cm
 delayBetweenDistanceMeasurements = 2    # value 1 caused unstable analog read values from distance sensor (2.4.2019)
 finalDockingMoveDistance = 12            # distance to move forward after seeing activated docking switch
 
@@ -40,9 +42,7 @@ class cMoveState(Enum):
 ##################################################################
 # cartControl can run as slave of navManager or in standalone mode
 ##################################################################
-standAloneMode = False  # False -> slave mode,  True -> standalone mode
-
-MY_IP = "192.168.0.17"
+MY_IP = "192.168.0.37"
 MY_RPC_PORT = 20001
 MY_NAME = 'cartControl'
 
@@ -60,6 +60,9 @@ NUM_MEASUREMENTS_PER_SCAN = 11
 
 distanceList = np.zeros((NUM_DISTANCE_SENSORS, NUM_MEASUREMENTS_PER_SCAN), dtype=np.int16)
 obstacleInfo = []
+
+streamD415 = None
+D415streaming = False
 
 distanceSensors = []
 # front left
@@ -146,15 +149,20 @@ _orientationBeforeMove = 0
 _moveDirection = Direction.STOP
 
 # Current cart position (center of cart) relative to map center, values in mm
-imuDegrees = 0
-imuDegreesCorrection = 0
-_imuPitch = 0.0
-_imuRoll = 0.0
+platformImuYaw = 0
+platformImuYawCorrection = 0
+platformImuPitch = 0.0
+platformImuRoll = 0.0
+
+headImuYaw = 0
+headImuYawCorrection = 0
+headImuPitch = 0.0
+headImuRoll = 0.0
 
 cartLocationX = 0
 cartLocationY = 0
-_cartTargetLocationX = 0
-_cartTargetLocationY = 0
+cartTargetLocationX = 0
+cartTargetLocationY = 0
 cartLastPublishTime = time.time()
 lastLocationSaveTime = time.time()
 
@@ -174,10 +182,32 @@ _f = None
 
 
 kinectIp = MY_IP
-kinectPort = 20003
+kinectPort = 20004
 kinectConnection = None
 monitoringWithKinect = False
 firstKinectConnectionAttempt = True
+
+# servoControl connection
+servoControlIp = MY_IP
+servoControlPort = 20004
+servoControlConnection = None
+servoControlConnectionFirstTry = True
+pitchGroundWatchDegrees = -35   # head.neck
+yawGroundWatchDegrees = 0      # head.rotate
+
+pitchWallWatchDegrees = -10   # head.neck
+yawWallWatchDegrees = 0      # head.rotate
+
+# the depth cam image includes the cart front when looking down
+# use a registered cart front image to locate the cart front in the current image
+# to register a new cart front image delete the existing cart front file and use a situation without obstacles
+# check for the cart front only in the lower half of the image (cartFrontMinRow .. image height)
+cartFrontImage = None
+cartFrontBorderX = 4
+cartFrontMinRow = 160
+cartFrontRowShift = 0
+cartFrontColShift = 0
+inForwardMove = False
 
 # def startlog():
 #    logging.basicConfig(filename="cartControl.log", level=logging.INFO, format='%(asctime)s - %(name)s - %(message)s', filemode="w")
@@ -238,7 +268,7 @@ def evalTrigDegrees(orientation, moveDirection: Direction):
 
 
 def getSensorName(sensorID):
-    return ["front left", "front center", "front left", "back left", "back center", "back right", "left front", "right front", "left back", "right back"][sensorID ]
+    return ["front left", "front center", "front right", "back left", "back center", "back right", "left front", "right front", "left back", "right back"][sensorID ]
 
 
 def signedAngleDifference(start, end):

@@ -6,6 +6,7 @@ import numpy as np
 import arduinoSend
 import cartControl
 import config
+import move
 
 CANV_WIDTH = 300
 CANV_HEIGHT = 500
@@ -403,8 +404,11 @@ class manualControl:
         cartSpeed = int(self.sbSpeed.get())
         distance = int(self.sbDist.get())
         config.log(f"moveCart requested from cart gui, speed: {cartSpeed}, distance: {distance}")
-        arduinoSend.sendMoveCommand(config.Direction(self.direction), cartSpeed, distance)
-        self.lblCommandValue.configure(text="Move")
+        #arduinoSend.sendMoveCommand(config.Direction(self.direction), cartSpeed, distance)
+        if move.moveRequest(config.Direction(self.direction), cartSpeed, distance, protected=True):
+            self.lblCommandValue.configure(text="Move")
+        else:
+            config.log(f"move failed")
         # self.lblMove.configure(text=str(speed))
         self.w.update_idletasks()
 

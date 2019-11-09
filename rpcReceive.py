@@ -9,8 +9,7 @@ import arduinoSend
 import gui
 import cartControl
 import rpcSend
-
-watchInterval = 5
+import move
 
 server = 'cartControl'
 
@@ -18,7 +17,6 @@ server = 'cartControl'
 class rpcListener(rpyc.Service):
 
     ############################## common routines for clients
-    watchInterval = 5
 
     def on_connect(self, conn):
         print(f"on_connect seen {conn}")
@@ -78,14 +76,19 @@ class rpcListener(rpyc.Service):
         os._exit(0)
         return True
 
+    def exposed_log(self, msg):
+        # ignore
+        pass
+
     ############################## common routines for clients
 
 
     def exposed_move(self, direction: int, speed, distance, protected:bool=True):
         moveDirection = config.Direction(direction)
         config.log(f"exposed_move , direction: {moveDirection}, speed: {speed}, distance: {distance}", publish=False)
-        arduinoSend.sendMoveCommand(moveDirection, speed, distance, protected)
-        return True
+        #arduinoSend.sendMoveCommand(moveDirection, speed, distance, protected)
+        success = move.moveRequest(moveDirection, speed, distance, protected)
+        return success
 
 
     def exposed_rotateRelative(self, angle, speed):
@@ -113,7 +116,7 @@ class rpcListener(rpyc.Service):
         config.log(f"adjust cart position received, x: {dX}, y: {dY}, degrees: {dYaw}", publish=False)
         config.cartLocationX += dX
         config.cartLocationY += dY
-        config.imuDegreesCorrection += dYaw
+        config.platformImuYawCorrection += dYaw
         return True
 
 
@@ -169,3 +172,6 @@ class rpcListener(rpyc.Service):
         arduinoSend.powerKinect(newState)
         return True
 
+
+    def exposed_requestHeadOrientation(self):
+        return config.headImuYaw, config.headImuRoll, config.headImuPitch
