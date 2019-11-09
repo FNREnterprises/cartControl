@@ -195,6 +195,7 @@ servoControlConnectionFirstTry = True
 pitchGroundWatchDegrees = -35   # head.neck
 yawGroundWatchDegrees = 0      # head.rotate
 
+# wall watch position of head
 pitchWallWatchDegrees = -10   # head.neck
 yawWallWatchDegrees = 0      # head.rotate
 
