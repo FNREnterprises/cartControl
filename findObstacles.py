@@ -2,38 +2,52 @@
 
 
 import numpy as np
-import pickle
 import cv2
-import time
 
+import inmoovGlobal
 import config
-import depthImage
+import camImages
 
 # x = left/right
 # y = front/back
 # z = depth
 
+
+def crop_boolMat(boolMat):
+    # img is 2D array with true/false
+    # remove false only rows and cols from array
+    coords = np.argwhere(boolMat)
+    x_min, y_min = coords.min(axis=0)
+    x_max, y_max = coords.max(axis=0)
+    return boolMat[x_min:x_max + 1, y_min:y_max + 1]
+
+
 def initObstacleDetection():
 
     # try to load the registred cart front image
     try:
-        pickleFile = open(r'cartFront.pickle', 'rb')
-        config.cartFrontImage = pickle.load(pickleFile)     # boolean array
+        with open(r'cartFrontLine.npy', 'rb') as npFile:
+            config.cartFrontLine = np.load(npFile)     # boolean array
+            createCartFrontShape()
     except Exception as e:
-        config.log(f'no cart front image found, current image is used to create a cart front image, {e}')
+        config.log(f'no cart front line found, current image is used to create a cart front line, {e}')
+        return
 
 
-def camPosGroundOK(neckDegrees, rotheadDegrees):
-    return abs(neckDegrees - config.pitchGroundWatchDegrees) < 3 and \
-           abs(rotheadDegrees - config.yawGroundWatchDegrees) < 3
+def createCartFrontShape():
+
+    # create the cart front shape from the cart front line data
+    rows = np.amax(config.cartFrontLine)
+    cols = config.cartFrontLine.shape[0]
+    config.cartFrontShape = np.zeros((rows+1, cols+1), dtype=np.bool)
+    for c in range(cols):
+        if config.cartFrontLine[c] > 0:
+            config.cartFrontShape[rows - config.cartFrontLine[c], c] = True
+
+    #showBoolMat(config.cartFrontShape, "cart front shape", (100,0))
 
 
-def camPosWallOK(neckDegrees, rotheadDegrees):
-    return abs(neckDegrees - config.pitchWallWatchDegrees) < 3 and \
-           abs(rotheadDegrees - config.yawWallWatchDegrees) < 3
-
-
-def showObstacles(mat, title):
+def showBoolMat(mat: np.ndarray, title: str, pos: tuple = (100, 100)):
     '''
     shows an 2 dim boolean array as white for true, black for false
     :param mat:
@@ -44,8 +58,9 @@ def showObstacles(mat, title):
     img[mat] = 255                          # fill with white
     img[mat == False] = 0                   # set all points with False to black
 
-    config.log(f"showObstacles: {title}")
+    config.log(f"showObstacles: {title} at {pos}")
     cv2.imshow(title, img)
+    cv2.moveWindow(title, pos[0], pos[1])
     cv2.waitKey(1)
     #cv2.destroyAllWindows()
 
@@ -70,8 +85,8 @@ def numpy_bfill(arr):
     50, nan, nan, 49 -> 50, 49, 49, 49
     '''
     mask = np.isnan(arr)
-    idx = np.where(~mask, np.arange(mask.shape[1]), mask.shape[0] + 1)
-    idx = np.minimum.accumulate(idx[:, ::-1], axis=1)[:, ::-1]
+    idx = np.where(~mask, np.arange(mask.shape[1]), mask.shape[1] - 1)
+    idx = np.minimum.accumulate(idx[:, ::-1], axis=1)[:, ::-1]      # ::-1 reverses array
     out = arr[np.arange(idx.shape[0])[:,None], idx]
     return out
 
@@ -88,52 +103,84 @@ def translateImage(img, translateX, translateY):
     return cv2.warpAffine(img, M, img.shape[:2])
 
 
-def removeCartFront(image):
-    '''
+def removeCartFront(groundImage):
+    """
+    use only upper area of image to find first obstacle
+    this should avoid the cart front to be seen as obstacle
+
+    this is a simpler version of the more detailed cart front removal removeCartFrontDetailed
+    (which never worked so far ...)
+    """
+    rows, cols = groundImage.shape
+    upperArea = groundImage[0:rows-30]
+
+    # as argmax returns the index of the first True value flip the image
+    np.flipud(upperArea)
+    #showBoolMat(upperArea, "flipped upper area")
+
+    # for each column the closest y point with z(height) change
+    rowObstacles = upperArea.shape[0] - np.argmax(upperArea, axis=0) + 30
+    rowCartFront = np.full(cols, 30)
+
+    return rowCartFront, rowObstacles
+
+'''
+def removeCartFrontDetailed(image, firstDepthRow):
+    """
     When the cam points down to check for ground obstacles it sees the cart front too
     Use a registred image with the cart front to find a match with current picture and
     remove the cart front from the obstacle image
     This is needed because the cam is mounted on the inMoov head and the pitch angle
     is not guaranteed to be repeatable.
-    '''
+    """
 
     # use the cartFront as mask and shift it over the current image
     # find minimum pixel count in combined image
-    cfRows, cfCols = config.cartFrontImage.shape
+    cfRows, cfCols = config.cartFrontShape.shape
     imgRows, imgCols= image.shape
+
+    config.log(f"cf: {config.cartFrontShape.shape}, img: {image.shape}")
+
     lowestSum = imgCols * imgRows          # initialize with max sum of pixels in image
-    bestShift = None
-    showObstacles(image, 'image')  # verification only
+    bestShiftImg = None
+    #showObstacles(image, 'ground image')  # verification only
 
     # use only lower part of image for cart front search
-    img1 = image[config.cartFrontMinRow:, :]
+    img1 = image[(imgRows - config.cartFrontSearchRows):, :]
+    #showObstacles(img1, 'front search area')  # verification only
 
     # add the registered cartFront to the image at different locations
     for x in range(2 * config.cartFrontBorderX):         # left/right shift
-        for y in range(imgRows - config.cartFrontMinRow - cfRows):   # top/down shift
+        for y in range(config.cartFrontRows - cfRows):   # top/down shift
 
             # add shifted cart front to img2
             img2 = np.zeros_like(img1, dtype=np.bool)
-            img2[y:y+cfRows, x:x+cfCols] = np.bitwise_or(img2[y:y+cfRows, x:x+cfCols], config.cartFrontImage)
+            #config.log(f"y: {y}, y+cfRows: {y+cfRows}, x: {x}, x+cfCols: {x+cfCols}, img2.shape: {img2.shape}")
+            img2[y:y+cfRows, x:x+cfCols] = np.bitwise_or(img2[y:y+cfRows, x:x+cfCols], config.cartFrontShape)
             #showObstacles(img2, 'shifted cartFront')  # verification only
 
             img3 = np.bitwise_or(img1, img2)
-            #showObstacles(img3, 'overlay')  # verification only
+            showBoolMat(img3, 'overlay')  # verification only
 
             newSum = np.sum(img3)
             if newSum < lowestSum:
+                # save the best fitting cart front offset
                 lowestSum = newSum
-                bestShift = img2
+                bestShiftImg = img2
                 config.cartFrontRowShift = y
                 config.cartFrontColShift = x
                 #config.log(f"lowestSum: {lowestSum}, shift: {y}")
 
-    showObstacles(bestShift, 'bestShift')  # for verification only
+    #showObstacles(bestShiftImg, 'bestShiftImg', (50,200))  # for verification only
 
-    # for each col find the cart front
-    rowCartFront = np.argmax(bestShift, axis=0) + config.cartFrontMinRow - config.cartFrontRowShift
+    # for each col set the cart front start row
+    #rowCartFront = np.argmax(bestShiftImg, axis=0) + imgRows - config.cartFrontRows + config.cartFrontRowShift
+    startCol = config.cartFrontColShift
+    endRow = config.cartFrontRows + config.cartFrontRowShift + config.cartFrontShape.shape[0]
+    for col in range(config.cartFrontLine.shape[0]):
+        rowCartFront[col+startCol] = -config.cartFrontLine[col] + endRow  # the distance per col of the cart front
 
-    # create an image mask without the cart
+    # create a ground image mask without the cart
     groundMask = np.ones_like(image, dtype=np.bool)
 
     # take out leftmost cols ...
@@ -144,11 +191,11 @@ def removeCartFront(image):
     for col in range(config.cartFrontColShift, imgCols):
         groundMask[rowCartFront[col]:imgRows, col] = False
 
-    showObstacles(groundMask, 'cart mask')  # for verification only
+    #showBoolMat(groundMask, 'cart mask', (100, 100))  # for verification only
 
     ground = np.bitwise_and(image, groundMask)
 
-    showObstacles(ground, 'ground without cart')  # for verification only
+    showBoolMat(ground, 'ground without cart', (100, 300))  # for verification only
 
     # as argmax returns the index of the first True value flip the image
     np.flipud(ground)
@@ -157,270 +204,359 @@ def removeCartFront(image):
     rowObstacles = imgRows - np.argmax(ground, axis=0)
 
     return rowCartFront, rowObstacles
+'''
 
 
-def obstacleDistances(xyz, camZ: float):
+def groundObstacles(xyz):
     """
     here in xyz
     x = left-right
-    y = depth (drive direction)
-    z = height
+    y = dist (drive direction)
+    z = vertical height above ground
+    find changes in height in x and y direction and mark changes > 20mm as obstacles
     :param xyz:     points
-    :param camY:    height of cam over ground
-    :return:        for each image col the closest obstacle
+    :return:        for each image col the first obstacle row
     """
 
-    config.log(f"eval closest point per column", publish=False)
+    HEIGHT_THRESHOLD = 0.025
 
-    # replace too close and too far points with NaN
+    config.log(f"eval closest obstacle per column", publish=False)
 
-    # TODO without knowing current arm/finger positions get these out of the way
-    lowestArmZ = 0.92  #lowest reachable position with finger in relation to cam
-    np.warnings.filterwarnings('ignore')
+    # the points in the bird view image (rotated points)
+    rows, cols, _ = xyz.shape
 
-    # remove depth values above lowest finger Z
-    # and below max depth
-    xyz[:, :, 2][(xyz[:, :, 2] < lowestArmZ) | (xyz[:, :, 2] > 2.5)] = np.NaN
-    #xyz[:, :, 2][(xyz[:, :, 2] > camY - 0.050) & (xyz[:, :, 2] < camY + 0.050)] = np.NaN
+    # we are interested in the height values of the ground points only
+    origHeights = xyz[:,:,2]
 
-    # limit area in drive-direction
-    # replace z(height) values outside y-range(drive direction) 0..1m with NaN
-    xyz[:, :, 2][(xyz[:, :, 1] == 0.0) | (xyz[:,:,1] > 1)] = np.NaN
+    # the cam delivers the first row as the one farthest away from the cart
+    # flip the rows
+    heights = np.flipud(origHeights)
 
-    # limit area to cart's width
-    # replace z(height) values outside x-range(width) -0.3..0.3m (cart width) with NaN
-    xyz[:, :, 2][(xyz[:, :, 0] < -0.3) | (xyz[:, :, 0] > 0.3)] = np.NaN
+    # skip the cart front from the heights
+    firstDepthRow = 30
 
-    heights = xyz[:,:,2]
-    colsWithDepth = np.nanmax(heights, axis=0)
-    firstDepthCol = np.where(~np.isnan(colsWithDepth))[0][0]
-    lastDepthCol =  np.where(~np.isnan(colsWithDepth))[0][-1]
+    # from height 1.50 m one row represents around 5 mm ground space
+    # check for obstacles in the range of 60 cm ahead of the cart
+    numDepthRows = int(0.6 / 0.005)
+    lastDepthRow = firstDepthRow + numDepthRows
 
-    # get row indices with non-nan-values
-    rowsWithDepth = np.nanmax(heights, axis=1)
-    # get the first row with a value
-    firstDepthRow = np.where(~np.isnan(rowsWithDepth))[0][0] + 2
+    # limit cols to the robots width
+    # from height 1.50 m one col represents around 4.5 mm ground space
+    robotCols = int(config.robotWidth / 0.0045)
+    firstDepthCol = int((cols + robotCols) / 2)
+    lastDepthCol = firstDepthCol + robotCols
 
-    reducedHeights = heights[firstDepthRow:,firstDepthCol:lastDepthCol]
 
-    # We might have nan values in left and right area
-    # replace nan heights with the left/right preceeding value
-    forwardFilledHeights = numpy_ffill(reducedHeights)
+    limitedHeightsArea = heights[firstDepthRow:lastDepthRow,firstDepthCol:lastDepthCol]
+    rows, cols = limitedHeightsArea.shape
+
+    # We might have nan values as height
+    # replace nan heights from left to right, then right to left with the preceeding value
+    limitedHeightsArea[:,0] = np.NaN             # set leftmost col to nan
+    limitedHeightsArea[:,cols-1] = np.NaN        # set rightmost col to nan
+
+    leftToRightFilledHeights = numpy_ffill(limitedHeightsArea)
     # do the reverse too (replace nan with the right preceeding value
-    filledHeights = numpy_bfill(forwardFilledHeights)
-
-    #filledHeights = np.concatenate((backwardFilledHeights[:,:100], forwardFilledHeights[:,101:]), axis=1)
-
-    # leave out far away zone
-    #filledHeights = filledHeights[firstDepthRow:,:]
+    filledHeights = numpy_bfill(leftToRightFilledHeights)
 
     # calc the height changes in drive direction row wise
-    depthChangeForward = np.diff(filledHeights[:, :], axis=1, append=np.NaN)
+    groundChangeForward = np.diff(filledHeights, axis=0, append=np.NaN)
 
     # ... and set depthChanges < 0.020 m to False (not an obstacle)
-    depthObstacleForward = np.full((depthChangeForward.shape), True, dtype=bool)
-    depthObstacleForward[(abs(depthChangeForward) < 0.020) | (depthChangeForward == np.NaN)] = False
+    with np.errstate(invalid='ignore'):
+        groundObstacleForward = np.full((groundChangeForward.shape), True, dtype=bool)
+        groundObstacleForward[(abs(groundChangeForward) < HEIGHT_THRESHOLD)] = False
 
-    #] calc the changes in left-right-direction column-wise
-    depthChangeLeftRight = np.diff(filledHeights[:, :], axis=0, append=np.NaN)
+    # set bottom most row to False
+    groundObstacleForward[-1] = False
+
+    #showBoolMat(groundObstacleForward,"height change forward")
+
+    # calc the changes in left-right-direction column-wise
+    groundChangeLeftRight = np.diff(filledHeights, axis=1, append=np.NaN)
 
     # ... and set depthChanges < 0.02 m to nan
-    depthObstacleLeftRight = np.full((depthChangeForward.shape), True, dtype=bool)
-    depthObstacleLeftRight[(abs(depthChangeLeftRight) < 0.020) | (depthChangeForward == np.NaN)] = False
+    with np.errstate(invalid='ignore'):
+        groundObstacleLeftRight = np.full((groundChangeLeftRight.shape), True, dtype=bool)
+        groundObstacleLeftRight[(abs(groundChangeLeftRight) < 0.020)] = False
 
-    # for tests, add an obstacle
-    #depthObstacleForward[100, 50:65] = True
+    # set right most col to False
+    groundObstacleLeftRight[:,-1] = False
 
-    depthObstaclesAll = np.logical_or(depthObstacleLeftRight, depthObstacleForward)
+    #showBoolMat(groundObstacleLeftRight,"height change left/right")
 
+    # combine forward/side bottom changes into an obstacle map
+    groundObstaclesAll = np.logical_or(groundObstacleLeftRight, groundObstacleForward)
 
-    # check for existing cart front image
+    #showBoolMat(groundObstaclesAll, 'all height changes')  # for verification
 
-    if config.cartFrontImage is None:
+    groundObstaclesAll[50, 100] = True  # simulate a single pixle obstacle
+
+    # filter out single pixels
+    filteredObstacles = cv2.blur(groundObstaclesAll.astype(np.uint8), (3,3))
+
+    #showBoolMat(filteredObstacles.astype(bool), 'filtered obstacles')  # for verification
+    '''
+    # check for existing cart front definition
+    if config.cartFrontLine is None:
 
         # if it does not exist create it from current image
-        # in this case the current image is assumed to be free of obstacles (beside the cart itself)
+        # --> in this case the current image is assumed to be free of obstacles (beside the cart itself)
         config.log(f"create new cart front")
-        showObstacles(depthObstaclesAll, 'create new cartFront')        # for verification
 
-        # use reduced range of image to allow for shifting of cart front over realtime image
-        h, w = depthObstaclesAll.shape  # the height and width of the reference image
+        showBoolMat(groundObstaclesAll, 'create new cartFrontShape', (100,400))        # for verification
 
-        refImg = depthObstaclesAll[config.cartFrontMinRow:h, config.cartFrontBorderX:w-config.cartFrontBorderX]
-        h, w = refImg.shape           # the height and width of the reference image
+        # use a limited image size for the cart front to allow shifting it over later images
+        # use only area in front of cart
+        rows, cols = groundObstaclesAll.shape
+        frontShape = groundObstaclesAll[rows-config.cartFrontRows:,config.cartFrontBorderX:-config.cartFrontBorderX]
 
-        # for each column the first row showing the cart
-        frontLine = np.nanargmax(refImg, axis=0)
+        # fatten up the line in left/right direction (closing gaps)
+        frontShape = np.bitwise_or(frontShape[:,:-1], frontShape[:,1:])
+        frontShape = np.bitwise_or(frontShape[:,1:], frontShape[:,:-1])
 
-        firstPixRow = h     # initialize to max
-        for x in range(w):
-            if frontLine[x] > 0 and frontLine[x] < firstPixRow:       # find min range of cart front
-                firstPixRow = frontLine[x]                            # the first row with ground diff
-            for y in range(h):                                        # clear pixels below front line
-                if y > frontLine[x]:
-                    refImg[y,x] = False
+        # remove all false outside rows and cols, drop last row
+        cropped = crop_boolMat(frontShape[:-1])
 
-        # fatten up the line
-        refImg = np.bitwise_or(refImg[:-1], refImg[1:])
-        refImg = np.bitwise_or(refImg[1:], refImg[:-1])
-        refImg = np.bitwise_or(refImg[:,:-1], refImg[:,1:])
-        refImg = np.bitwise_or(refImg[:,1:], refImg[:,:-1])
-        h, w = refImg.shape     # fatting the line reduced the img size
+        # for each column the number of rows at the image bottom (highest row) to remove the cart front
+        config.cartFrontLine = cropped.shape[0] - np.nanargmax(cropped, axis=0) - 1
 
-        showObstacles(refImg, 'front shape of refImg')
 
-        # include only rows that represent the cart front
-        lastPixRow = 0
-        for testRow in range(firstPixRow, h-1):
-            if np.sum(refImg[testRow]) > 0:
-                lastPixRow = testRow
+        with open(r'cartFrontLine.npy', 'wb') as npFile:
+            np.save(npFile, config.cartFrontLine)
 
-        firstPixRow = max(firstPixRow - 4, 0)   # add some head space
-        refImg = refImg[firstPixRow:lastPixRow]
-        h, w = refImg.shape
+        # create the cartFrontShape for shifting it over this image
+        createCartFrontShape()
 
-        config.log(f"firstPixRow: {firstPixRow}, lastPixRow: {lastPixRow}")
-
-        if lastPixRow > firstPixRow:
-
-            # create a filled cart front as mask
-            # find first pix in each col
-            cfStartRows = np.argmax(refImg, axis = 0)
-
-            # and fill area below
-            for col in range(w):
-                if cfStartRows[col] > 0:
-                    refImg[cfStartRows[col]:h, col] = True
-
-            config.cartFrontImage = refImg
-            showObstacles(config.cartFrontImage, 'cartFront for pickle')  # for verification only
-
-            pickleFile = open(r'cartFront.pickle', 'wb')
-            pickle.dump(config.cartFrontImage, pickleFile)
-            pickleFile.close()
-
+        showBoolMat(config.cartFrontShape, 'new cart front shape')      # for verification only
 
     # as the cam angle is dependent on the neck servo it is not over-accurate
     # try to find the cart front in the image by comparing it with the registred cart front shape
-    # cartFront has the highest image row per column of the cart
-    obstacles = removeCartFront(depthObstaclesAll)
+    # cartFrontShape has the highest image row per column of the cart
+
+    #obstacles = removeCartFrontDetailed(groundObstaclesAll)        # TODO
+    '''
 
     config.log(f"return obstacle array (closest obstacle in each col)", publish=False)
-    return obstacles   # for each image column the closest obstacle
+    w, h = filteredObstacles.shape
+    obstacleRows = np.zeros(w)
+    filteredObstacles[:,h-1] = 255        # set top row of each col as obstacle
+    for col in range(w):
+        obstacleRows[col] = np.argmax(filteredObstacles[col,:])
+
+    return obstacleRows   # for each image column the first row with an obstacle
 
 
-def rotatePointCloud(points, angle):
+def showSliceRaw(pc, slice):
 
-    verts = np.asanyarray(points).view(np.float32).reshape(-1, 3)  # xyz
+    # show a slice as line
+    p = pc.reshape(240,428,3)
 
-    # rotate over x-axis
-    cosa = np.cos(np.radians(angle))
-    sina = np.sin(np.radians(angle))
+    h,w = 200,300
+    img = np.zeros((h,w))
+    for row in range(240):
+        try:
+            x = int(p[row, 208, 2] / 0.02)   #dist
+            y = h+int(p[row, 208, 1] / 0.02) - 50 #height, use 0,150 as zero point
+        except:
+            y=0
+            x=0
+        if 0 < x < 300 and 0 < y < 200:
+            img[y,x] = 255
+    cv2.imshow(f"slice {slice}", img)
+    cv2.waitKey(500)
+    cv2.destroyAllWindows()
 
-    xyz = np.zeros_like(verts)
-    xyz[:, 0] = verts[:, 0]
-    xyz[:, 1] = -(verts[:, 1] * cosa - verts[:, 2] * sina)
-    xyz[:, 2] = verts[:, 1] * sina + verts[:, 2] * cosa
-    xyz = xyz.reshape(240, 428, 3)
+def showSlice(pc, slice):
 
-    # save as pickle file for testing
-    file = "xyzGround.pickle"
-    myFile = open(r'C:\Projekte\InMoov\realsense\pc.pickle', 'wb')
-    pickle.dump(xyz, myFile)
-    myFile.close()
+    # show a slice as line
+    p = pc.reshape(240,428,3)
 
-    return xyz  # rotated point cloud giving vertical distances
-
-
-def distGroundObstacles():
-
-    # having a connection verify head neck position
-    neckDegrees, _, _ = config.servoControlConnection.root.exposed_getPosition("head.neck")
-    rotheadDegrees, _, _ = config.servoControlConnection.root.exposed_getPosition("head.rothead")
-
-    # if neck is not in ground observation position request neck position
-    numTries = 0
-    while not camPosGroundOK(neckDegrees, rotheadDegrees) and numTries < 3:
-        numTries += 1
-        config.servoControlConnection.root.exposed_requestServoDegrees("head.neck", config.pitchGroundWatchDegrees, 1)
-        config.servoControlConnection.root.exposed_requestServoDegrees("head.rothead", config.yawGroundWatchDegrees, 1)
-        time.sleep(1)
-        neckDegrees, _, _ = config.servoControlConnection.root.exposed_getPosition("head.neck")
-        rotheadDegrees, _, _ = config.servoControlConnection.root.exposed_getPosition("head.rothead")
-
-    if not camPosGroundOK(neckDegrees, rotheadDegrees):
-        config.log(f"could not move head into ground watch position, neck: {neckDegrees:0f}, rothead: {rotheadDegrees:0f}")
-        return False
-
-    else:
-
-        points = depthImage.getDepth()
-
-        if points is None:
-            config.log(f"could not get image from D415")
-            return False
-
-        depth = rotatePointCloud(points, camAngle=16)
-
-        camZ = 1.48
-        rowCartFront, rowObstacle = obstacleDistances(depth, camZ)
-
-        # the start column in the total image of the cart front
-        xMin = int((depth.shape[0] - rowCartFront.shape[0]) / 2)
-
-        # get the y difference of cartFront and obstacle
-        distAndPos = \
-            [(depth[rowObstacle[d], d + xMin, 1] - depth[rowCartFront[d], d + xMin, 1],
-              depth[rowObstacle[d], d + xMin, 0],
-              depth[rowObstacle[d], d + xMin, 1])
-             for d in range(rowCartFront.shape[0])]
-
-        posDist = [d[0] if d[0] > 0 else 1 for d in distAndPos]
-
-        distClosestObstacle = np.amin(posDist)
-        xClosestObstacle = distAndPos[np.argmin(posDist)][1]
-        yClosestObstacle = distAndPos[np.argmin(posDist)][2]
-
-        config.log(f"distClosestObstacle: {distClosestObstacle:.3f}, x: {xClosestObstacle:.3f}, y: {yClosestObstacle:.3f}")
-        obstacleDirection = np.degrees(np.arctan2(xClosestObstacle, yClosestObstacle))
-
-        return distClosestObstacle, obstacleDirection
+    img = np.zeros((200,300))
+    for row in range(240):
+        if not np.isnan(p[row, 208, 1]):
+            x = int(p[row, 208, 1] / 0.02)   #dist
+            y = 150 + int(p[row, 208, 2] / 0.02) #height, use 0,150 as zero point
+        else:
+            y=0
+            x=0
+        if 0 < x < 200 and 0 < y < 300:
+            img[y,x] = 255
+    cv2.imshow(f"slice {slice}", img)
+    cv2.waitKey(500)
+    cv2.destroyAllWindows()
 
 
-def distWall():
+def showPoints(p, title):
+
+    import matplotlib.pyplot as plt
+    import mpl_toolkits.mplot3d.axes3d as p3    # needed for projection='3d'
+
+    ax=plt.axes(projection='3d')
+    xList = [x[0] for x in p]
+    yList = [y[1] for y in p]
+    zList = [z[2] for z in p]
+    ax.scatter3D(xList, yList, zList, c=zList, cmap='Greens')
+
+    ax.set_xlabel('X-0')
+    ax.set_ylabel('Y-1')
+    ax.set_zlabel('Z-2')
+    ax.set_title(title)
+
+    plt.show()
+
+
+def distGroundObstacles(points):
     '''
-    raise head and take a depth image
-    find closest point above ground in path and shape of robot
-    to simplify use a rectangle for the robot shape
-    For a start use a "move pose" of the robot to avoid collisions with an outstreched hand with the wall.
+    for ground obstacles use the height differences between points and not the absolute distance to cam
+    :param points:
     :return:
-    distanceArray robot/wall
     '''
+    # replace out of scope points with NaN
+    # limit to robot's width
+    with np.errstate(invalid='ignore'):
+        points[:,0] [(points[:,0] < -config.robotWidth2) | (points[:,0] > config.robotWidth2)] = np.NaN
+    #showPoints(groundPoints, 'orig')
 
-    # having a connection verify head neck position
-    neckDegrees, _, _ = config.servoControlConnection.root.exposed_getPosition("head.neck")
-    rotheadDegrees, _, _ = config.servoControlConnection.root.exposed_getPosition("head.rothead")
+    # TODO without knowing current arm/finger positions get these out of the way
+    # remove depth values above lowest arm Z
+    lowestArmZ = 0.5  # lowest reachable position with finger in relation to ground
+    with np.errstate(invalid='ignore'):
+        points[:,2][(points[:,2] > lowestArmZ)] = np.NaN
 
-    # if neck is not in wall observation position request neck position
-    numTries = 0
-    while not camPosWallOK(neckDegrees, rotheadDegrees) and numTries < 3:
-        numTries += 1
-        config.servoControlConnection.root.exposed_requestServoDegrees("head.neck", config.pitchGroundWatchDegrees, 1)
-        config.servoControlConnection.root.exposed_requestServoDegrees("head.rothead", config.yawGroundWatchDegrees, 1)
-        time.sleep(1)
-        neckDegrees, _, _ = config.servoControlConnection.root.exposed_getPosition("head.neck")
-        rotheadDegrees, _, _ = config.servoControlConnection.root.exposed_getPosition("head.rothead")
+    #showPoints(xyz, 'above ground')
 
-    if not camPosWallOK(neckDegrees, rotheadDegrees):
-        config.log(f"could not move head into wall watch position, neck: {neckDegrees:0f}, rothead: {rotheadDegrees:0f}")
-        return False
+    # limit area in drive-direction
+    # replace z(height) values outside y-range(drive direction) 0.5m with NaN
+    #xyz[:,2][(xyz[:,1] > 0.6)] = np.NaN
 
-    else:
+    #showPoints(points, 'cartFront')
 
-        depth = depthImage.getDepth()
+    points = points.reshape(240, 428, 3)
 
-        if depth is None:
-            config.log(f"could not get image from D415")
-            return False
+    obstacleRows = groundObstacles(points)
 
-        camZ = 1.48
+
+    # at height 1.6, FOV Vertical = 42.5, 240 Rows one row accounts for about 5 mm
+    # at height 1.6, FOV Horizontal = 69.4, 428 Cols one col accounts for about 4.5 mm
+
+    distClosestObstacle = np.amin(obstacleRows) * 0.005
+    xClosestObstacle = np.argmin(obstacleRows)  * 0.0045 - config.robotWidth2
+
+    config.log(f"distClosestObstacle: {distClosestObstacle:.3f}, x: {xClosestObstacle:.3f}")
+    obstacleDirection = np.degrees(np.arctan2(xClosestObstacle, distClosestObstacle))
+
+    return distClosestObstacle, obstacleDirection
+
+
+def lookForCartPathObstacle(points):
+    """
+    this uses the cart's width to find closest obstacle in path
+    it looks at the points using the xyz position
+    :param points:
+    :return:
+    """
+    ####################################################
+    # points[0] = left/right, center=0
+    # points[1] = horizontal distance to point
+    # points[2] = height of point above ground
+    ####################################################
+    # reduce the points to the carts path
+    with np.errstate(invalid='ignore'):     # suppress nan warnings
+        points[:, 2][(points[:,0] < -config.robotWidth2) |
+                     (points[:,0] > config.robotWidth2) |
+                     (points[:,1] < 0.2) |
+                     (points[:,1] > 2)] = np.NaN
+
+    # remove the floor (reduces the points, col+row order of cam image not valid anymore)
+    with np.errstate(invalid='ignore'):     # suppress nan warnings
+        obstaclePoints = points[(points[:, 2] > 0.1)]
+
+    #showPoints(obstaclePoints, "without floor")
+
+    # create x-slices based on points x-position [:0] find closest point [:1] in each slice
+    robotWidthCm = int(config.robotWidth * 100)
+    robotWidthCm2 = int(robotWidthCm / 2)
+    obstacleDist = np.zeros(robotWidthCm)
+    obstacleMap = np.zeros((robotWidthCm, 201), dtype=np.bool)
+    for col in range(robotWidthCm):
+        xStart = (col - robotWidthCm2) / 100
+
+        # for each x-cm the distances to the obstacles
+        xSlice = obstaclePoints[(obstaclePoints[:, 0] >= xStart) & (obstaclePoints[:, 0] < xStart + 0.01)]
+
+        # from the cm slice the closest distance
+        obstacleDist[col] = np.amin(xSlice[:,1]) if len(xSlice) > 0 else 2
+
+        # set the obstacle points in the map
+        obstacleMap[col, int(obstacleDist[col]*100)] = True
+
+    # finally find closest obstacle in robot path to decide for stopping or continuing drive
+    freeMoveDist = np.amin(obstacleDist) - config.distOffsetCamFromCartFront
+    xPos = (np.argmin(obstacleDist) - robotWidthCm2) / 100
+    obstacleDirection = 90 - np.degrees(np.arctan2(freeMoveDist, xPos))
+
+    return freeMoveDist, obstacleDirection
+
+
+def findObstacleLine(points, show=True):
+    """
+    for each col from the cam depth image eval the closest obstacle ignoring floor and above head obstacles
+    :return:
+    """
+    ####################################################
+    # points[0] = left/right, center=0
+    # points[1] = horizontal distance to point
+    # points[2] = height of point above ground
+    ####################################################
+
+    # ultra fast!! inPathPoints = pc[(pc[:, 0] > -0.5) & (pc[:, 0] < 0.5) & (pc[:, 2] > 0.2) & (pc[:, 2] < 2)]
+    # set points outside scope to nan
+    with np.errstate(invalid='ignore'):
+        points[:, 2][(points[:,1] < 0.2) |          # point too close
+                     (points[:,1] > 4) |            # point too far away
+                     (points[:,2] < 0.1) |          # point in ground area
+                     (points[:,2] > 1.8)] = np.NaN  # point above robots head
+
+        #map = points.reshape(240,428,3)
+
+        # we are interested in the first 4 meters distance
+        # calc width with fovH depthCam at 4 meters
+        fovH = camImages.cams[inmoovGlobal.HEAD_CAM].fovH
+        xRange = np.tan(np.radians(fovH/2)) * 4 * 2
+
+        # use 2cm slices on x-axis
+        xSlices = int(xRange/0.02)
+
+        # array for first obstacle in x-slice
+        obstacleLine = np.full(xSlices, np.NaN)
+
+        for slice in range(xSlices):
+
+            # get all points with x-position in x-slice
+            xStart = (slice * 0.02) - (xSlices/2 * 0.02)
+            xEnd = xStart + 0.02
+            sliceObstacleDistances = points[:,1][(points[:,0] >= xStart) & (points[:,0] < xEnd) & (points[:,2] > 0.1)]
+
+            # check for found points and eval the closest one
+            if len(sliceObstacleDistances) > 0:
+                obstacleLine[slice] = np.nanmin(sliceObstacleDistances)
+
+        if show:
+            # draw a map in 2cm resolution
+            depthRows = int(4/0.02)
+            img = np.zeros((depthRows, xSlices))
+            for col, dist in enumerate(obstacleLine):
+                if not np.isnan(dist):
+                    img[depthRows - int(dist/0.02),col] = 255
+
+            cv2.imshow("obstacle line", img)
+            cv2.waitKey()
+            cv2.destroyAllWindows()
+
+    return obstacleLine
+
+
+
+
+

@@ -3,22 +3,27 @@ import os
 import sys
 import time
 import serial
+import subprocess
+
+from PyQt5.QtCore import Qt
 
 import gui
 import config
 import arduinoSend
 import cartControl
 import rpcSend
+import distanceSensors
 
 
 def initSerial(comPort):
 
     config.arduinoStatus = 0
+    reconnectionTried = False
 
     while True:
         try:
             config.arduino = serial.Serial(comPort)
-            # try to reset the arduino
+
             config.arduino.setDTR(False)
             time.sleep(0.1)
             config.arduino.setDTR(True)
@@ -28,9 +33,15 @@ def initSerial(comPort):
             return
 
         except Exception as e:
+            if reconnectionTried:
+                config.log(f"could not reconnect COM5, going down")
+                os._exit(0)
+
             config.log(f"exception on serial connect with {comPort} {e}")
-            time.sleep(10)
-            os._exit(0)
+            config.log(f"trying to reattach COM5")
+            subprocess.call("c:/utils/devcon.exe remove @USB\VID_2341*")
+            subprocess.call("c:/utils/devcon.exe rescan")
+            reconnectionTried = True
 
 
 #####################################
@@ -74,13 +85,16 @@ def readMessages():
                 config.log("!A0 received, cart ready")
                 config.log("")
                 config.cartReady = True
+                config.cartStatus = "CART READY"
+                config.cartStatusColor = ("black", "lightgreen")
 
 
             elif msgID == "!A1":  # distance values from obstacle sensors
                 # !A1,<sensorID>,<ANZ_MESSUNGEN_PRO_SCAN>,[ANZ_MESSUNGEN_PRO_SCAN<value>,]
                 config.log(f"{recv}", publish=False)
                 messageItems = [int(e) if e.isdigit() else e for e in recv.split(',')]
-                cartControl.updateDistances(messageItems)
+                distanceSensors.updateDistances(messageItems)
+                config.cartSensorUpdate = True
 
 
             elif msgID == "!A2":  # "obstacle:":
@@ -99,8 +113,8 @@ def readMessages():
                 config.log(f"!A2 obstacle detected, height: {distance} > limit: {limit}, sensor: {sensorName}", publish=cartControl.getMovementBlocked())
                 cartControl.setMovementBlocked(True)
 
-                gui.controller.updateDistanceSensorObstacle(distance, sensorName)
-                gui.controller.updateDistanceSensorAbyss("", -1)
+                config.sensorDistanceObstacle = str(distance)
+                config.cartStateChanged = True
 
 
             elif msgID == "!A3":  # "abyss:":
@@ -118,8 +132,11 @@ def readMessages():
 
                 cartControl.setMovementBlocked(True)
 
-                gui.controller.updateDistanceSensorAbyss(distance, sensorName)
-                gui.controller.updateDistanceSensorObstacle("", -1)
+                config.sensorDistanceAbyss = str(distance)
+                config.cartStateChanged = True
+
+                #gui.controller.updateDistanceSensorAbyss(distance, sensorName)
+                #gui.controller.updateDistanceSensorObstacle("", -1)
 
 
             elif msgID == "!A4":  # free path after move blocked
@@ -134,14 +151,17 @@ def readMessages():
                 items = recv.split(",")
                 config.platformImuYaw = round(float(items[1]))
                 distanceMoved = int(items[2])
-                moveDirection = config.Direction(int(items[3]))
+                moveDirection = config.MoveDirection(int(items[3]))
                 reason = items[4]
 
                 cartControl.setMovementBlocked(False)
                 cartControl.setCartRotating(False)
                 cartControl.setCartMoving(False)
+                config.flagInForwardMove = False    # stop monitoring with depth cam
+                config.currentCommand = "STOP"
+                config.cartStateChanged = True
 
-                if moveDirection not in [config.Direction.ROTATE_LEFT, config.Direction.ROTATE_RIGHT]:
+                if moveDirection not in [config.MoveDirection.ROTATE_LEFT, config.MoveDirection.ROTATE_RIGHT]:
                     magnitude = distanceMoved
                 else:
                     magnitude = abs(config.signedAngleDifference(config.rotateStartDegrees, cartControl.getCartYaw()))
@@ -150,13 +170,9 @@ def readMessages():
                 #config.log("<-A " + recv, publish=False)  # stop and reason
                 config.log(f"!A5 cart stopped, {reason}")
 
-                # if kinect monitoring is enabled try to stop it
-                if config.monitoringWithKinect:
-                    config.monitoringWithKinect = False
-                    try:
-                        config.kinectConnection.root.stopMonitoring()
-                    except Exception as e:
-                        config.log(f"could not request stop monitoring from kinect, {e}")
+                # if distance monitoring is enabled try to stop it
+                if config.distanceMonitoring:
+                    config.distanceMonitoring = False
 
 
             elif msgID == "!Aa":  # cart position/orientation update:
@@ -164,15 +180,19 @@ def readMessages():
                 #config.log(f"!Aa, cartUpdate: {recv}", publish=False)
                 items = recv.split(",")
                 config.platformImuYaw = round(float(items[1]))
-                distanceMoved = round(float(items[2]))
-                moveDirection = config.Direction(int(items[3]))
+                config.distanceMoved = round(float(items[2]))
+                moveDirection = config.MoveDirection(int(items[3]))
 
-                if moveDirection not in [config.Direction.ROTATE_LEFT, config.Direction.ROTATE_RIGHT]:
-                    magnitude = distanceMoved
+                if moveDirection not in [config.MoveDirection.ROTATE_LEFT, config.MoveDirection.ROTATE_RIGHT]:
+                    magnitude = config.distanceMoved
                 else:
                     magnitude = abs(config.signedAngleDifference(config.rotateStartDegrees, cartControl.getCartYaw()))
 
-                cartControl.updateCartLocation(magnitude, moveDirection, final=False)
+                if moveDirection == config.MoveDirection.STOP:
+                    if config.distanceMoved > 0:
+                        config.log(f"cart stopped but distance moved: {distanceMoved}, cart position might be wrong")
+                else:
+                    cartControl.updateCartLocation(magnitude, moveDirection, final=False)
 
 
             elif msgID == "!Ab":  # bno055 platform sensor update:
@@ -182,6 +202,8 @@ def readMessages():
                 config.platformImuRoll = float(items[2]) / 1000.0
                 config.platformImuPitch = float(items[3]) / 1000.0
                 config.log(f"!Ab, platformImu yaw: {config.platformImuYaw}, roll: {config.platformImuRoll}, pitch: {config.platformImuPitch}", publish=False)
+                config.cartOrientation = config.platformImuYaw + config.platformImuYawCorrection
+                config.cartStateChanged = True
 
             elif msgID == "!Ac":  # bno055 head sensor update:
                 # !Ab,<milliYaw>,<milliRoll>, <milliPitch>
@@ -189,6 +211,7 @@ def readMessages():
                 config.headImuYaw = round(float(items[1]) / 1000.0)
                 config.headImuRoll = float(items[2]) / 1000.0
                 config.headImuPitch = float(items[3]) / 1000.0
+                config.headImuSet = True
                 config.log(f"!Ac, headImu, yaw: {config.headImuYaw}, roll: {config.headImuRoll}, pitch: {config.headImuPitch}", publish=False)
 
             elif msgID == "!A6":  # cart docked
@@ -278,10 +301,9 @@ def readMessages():
                 if config._batteryStatus.percent == 100:
 
                     # undock the cart
-                    arduinoSend.sendMoveCommand(config.Direction.BACKWARD, 100, 200)
+                    arduinoSend.sendMoveCommand(config.MoveDirection.BACKWARD, 100, 200)
 
                     # and go to sleep
-                    arduinoSend.powerKinect(False)
                     os.system("rundll32.exe powrprof.dll,SetSuspendState 0,1,0")
 
         time.sleep(0.001)  # give other threads a chance

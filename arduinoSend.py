@@ -3,7 +3,9 @@ import time
 
 import config
 import cartControl
-import watchDog
+import threadWatchConnections
+
+sendCommandsToArduino = False   # allow or prevent messages to arduino
 
 ########################################################################
 ########################################################################
@@ -17,32 +19,13 @@ def sendConfigValues():
 
     msg = f"b,{config.SPEED_FACTOR:07.4f},{config.SPEED_OFFSET:07.4f},{config.SPEED_FACTOR_SIDEWAY:05.2f},{config.SPEED_FACTOR_DIAGONAL:05.2f}"
     config.arduino.write(bytes(msg + '\n', 'ascii'))
-    time.sleep(0.5)     # problems with overwriting message in Arduino
-
-    # distance sensor corrections
-    ''' try with auto-calibrate for the moment
-    msg = f"c"
-    for corr in config.distanceSensorCorrections:
-        msg += f",{corr:+03d}"
-    config.arduino.write(bytes(msg + '\n', 'ascii'))
-    config.log(f"distanceSensorCorrections sent: {msg}")
-    time.sleep(0.5)
-    '''
+    time.sleep(0.1)     # problems with overwriting message in Arduino
 
     # motor speed unifyers, FRONT_RIGHT, FRONT_LEFT, BACK_RIGHT, BACK_LEFT
     msg = f"d,104,102,097,088"
     config.arduino.write(bytes(msg + '\n', 'ascii'))
     config.log(f"motor speedUnifyers sent: {msg}")
-    time.sleep(0.5)
-
-def powerKinect(newState):
-    config.log(f"arduinoSend, send power command: {newState}")
-    if newState == True:
-        powerMsg = f"e,1"
-    else:
-        powerMsg = f"e,0"
-    config.arduino.write(bytes(powerMsg + "\n", 'ascii'))
-    config.log(f"kinect power command sent: {powerMsg}")
+    time.sleep(0.1)
 
 
 def sendMoveCommand(moveDirection: 'config.Direction', speed, distanceMm, protected=True):
@@ -57,26 +40,20 @@ def sendMoveCommand(moveDirection: 'config.Direction', speed, distanceMm, protec
 
     obstacleDistance = distanceMm
     if protected:
-        if moveDirection == config.Direction.FORWARD and config.kinectConnection is not None:
+        if moveDirection == config.MoveDirection.FORWARD and config.distanceMonitoring is not None:
             numTries = 1
             while numTries <= 2:
                 try:
                     startTime = time.time()
-                    config.kinectConnection.root.startMonitoring()
-                    config.monitoringWithKinect = True
-                    config.log(f"kinect monitoring for obstacles activated")
+                    config.distanceMonitoring = True
+                    config.log(f"distance monitoring for obstacles activated")
                     break
 
                 except Exception as e:
-                    if numTries == 1:
-                        # retry to connect
-                        numTries += 1
-                        watchDog.connectWithKinect()
-                    else:
-                        config.log(f"sendMoveCommand, could not start kinect monitoring, {e}")
+                    config.log(f"sendMoveCommand, could not start distance monitoring, {e}")
 
         else:
-            config.log(f"move without kinect control, {config.Direction(moveDirection)}")
+            config.log(f"move without distance control, {config.MoveDirection(moveDirection)}")
 
     distanceMmLimited = min(distanceMm, 2500)  # limit distance for single command
     config._moveDirection = moveDirection
@@ -91,10 +68,10 @@ def sendMoveCommand(moveDirection: 'config.Direction', speed, distanceMm, protec
     cartControl.setMovementBlocked(False)
     cartControl.setCartMoving(True, time.time() + durationLimited + 2000)
     flagProtected = 1 if protected else 0
-    moveMsg = f"1,{moveDirection.value},{speed:03.0f},{distanceMmLimited:04.0f},{durationLimited:05.0f},{flagProtected}"
-    config.arduino.write(bytes(moveMsg + "\n", 'ascii'))
+    msg = f"1,{moveDirection.value},{speed:03.0f},{distanceMmLimited:04.0f},{durationLimited:05.0f},{flagProtected}"
+    config.arduino.write(bytes(msg + "\n", 'ascii')) if sendCommandsToArduino else config.log(f"->A, {msg}")
     config.log(
-        f"Send move {moveMsg}, speed: {speed:.0f}, distance: {distanceMmLimited:.0f}, duration: {durationLimited:.0f}")
+        f"Send move {msg}, speed: {speed:.0f}, distance: {distanceMmLimited:.0f}, duration: {durationLimited:.0f}")
 
 
 def sendRotateCommand(relAngle, speed=200):
@@ -102,8 +79,14 @@ def sendRotateCommand(relAngle, speed=200):
     config.cartRotating = relAngle != 0
     cartControl.setMovementBlocked(False)
     config.rotateStartDegrees = cartControl.getCartYaw()
-    config._targetOrientation = (config.rotateStartDegrees + relAngle) % 360
+    config.cartTargetOrientation = (config.rotateStartDegrees + relAngle) % 360
+    config.cartStateChanged = True
     cartControl.setRequestedCartSpeed(speed)
+
+    # gui
+    config.sensorDistanceObstacle = "-"
+    config.sensorDistanceAbyss = "-"
+    config.cartStateChanged = True
 
     # command 2
     # msg = f"b,{cartGlobal.SPEED_FACTOR:07.4f},{cartGlobal.SPEED_EXPONENT:07.4f},{cartGlobal.SPEED_FACTOR_SIDEWAY:05.2f}"
@@ -112,20 +95,20 @@ def sendRotateCommand(relAngle, speed=200):
     if relAngle > 0:  # rotate counterclock
         msg = f"2,{abs(relAngle):03.0f},{speed:03.0f},1"
         config.log(f"Send rotate counterclock {msg}")
-        config.arduino.write(bytes(msg + '\n', 'ascii'))
+        config.arduino.write(bytes(msg + '\n', 'ascii')) if sendCommandsToArduino else config.log(f"->A, {msg}")
 
     # command 3
     if relAngle < 0:
         msg = f"3,{abs(relAngle):03.0f},{speed:03.0f},1"
         config.log(f"Send rotate clockwise {msg}")
-        config.arduino.write(bytes(msg + '\n', 'ascii'))
+        config.arduino.write(bytes(msg + '\n', 'ascii')) if sendCommandsToArduino else config.log(f"->A, {msg}")
 
 
 def sendStopCommand(reason):
     # command 4
     msg = b'4' + b'\n'
     config.log(f"Send stop, reason: {reason}")
-    config.arduino.write(msg)
+    config.arduino.write(msg) if sendCommandsToArduino else config.log(f"->A, {msg}")
     cartControl.setCartMoving(False)
 
 
@@ -133,7 +116,7 @@ def sendSpeedCommand(speed):
     # command 6
     msg = bytes(str(6000 + speed) + '\n', 'ascii')
     # cartGlobal.log("Send speed "+str(msg))
-    config.arduino.write(msg)
+    config.arduino.write(msg) if sendCommandsToArduino else config.log(f"->A, {msg}")
     cartControl.setRequestedCartSpeed(speed)
 
 
@@ -167,3 +150,9 @@ def setVerbose(newState: bool):
         config.arduino.write(msg)
     except:
         pass
+
+
+def distanceSensorCalibration():
+    msg = b'f' + b'\n'
+    config.arduino.write(msg)
+    config.log(f"distance sensor calibration requested")

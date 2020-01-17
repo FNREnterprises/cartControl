@@ -3,11 +3,13 @@ import time
 import datetime
 import sys
 import cv2
-import numpy as np
 from enum import Enum, unique
 import logging
 
+from PyQt5.QtCore import Qt
 
+serverName = 'cartControl'
+serverReady = False
 
 # configuration values for cart arduino infrared distance limits
 FLOOR_MAX_OBSTACLE = 3  # cm
@@ -17,12 +19,13 @@ finalDockingMoveDistance = 12            # distance to move forward after seeing
 
 cartDocked = False
 
-# should be set by auto calibraiton in cart
+# currently set by auto calibration in cart
 #                              FL     FR    L   R    BL     BR
 #                             n  f   n  f   n   n   n  f   n  f
 #distanceSensorCorrections = [-1,-5,  4,-5,  4,  3,  5, 8,  5, -1]
 
-
+d415Cfg = None
+d415Handle = None
 
 ##################################################################
 # needs to be the same as in navManager
@@ -42,9 +45,11 @@ class cMoveState(Enum):
 ##################################################################
 # cartControl can run as slave of navManager or in standalone mode
 ##################################################################
-MY_IP = "192.168.0.37"
+pcName = None
+pcIP = None
 MY_RPC_PORT = 20001
-MY_NAME = 'cartControl'
+
+taskName = 'cartControl'
 
 
 # values for arduino to calculate distance mm/s from speed value
@@ -55,67 +60,14 @@ SPEED_FACTOR_SIDEWAY = 0.5
 SPEED_FACTOR_DIAGONAL = 0.63
 
 
-NUM_DISTANCE_SENSORS = 10
-NUM_MEASUREMENTS_PER_SCAN = 11
-
-distanceList = np.zeros((NUM_DISTANCE_SENSORS, NUM_MEASUREMENTS_PER_SCAN), dtype=np.int16)
 obstacleInfo = []
+
 
 streamD415 = None
 D415streaming = False
 
-distanceSensors = []
-# front left
-distanceSensors.append(
-    {'sensorID': 0, 'direction': 'forward', 'position': 'left', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (0, 0), 'installed': True, 'servoIndex': 0, 'color': 'red',
-     'rotation': -180})
-# front center
-distanceSensors.append(
-    {'sensorID': 1, 'direction': 'forward', 'position': 'center', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (0, 1), 'installed': True, 'servoIndex': 0, 'color': 'blue',
-     'rotation': -180})
-# front right
-distanceSensors.append(
-    {'sensorID': 2, 'direction': 'forward', 'position': 'right', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (1, 0), 'installed': True, 'servoIndex': 1, 'color': 'red',
-     'rotation': -180})
-# back left
-distanceSensors.append(
-    {'sensorID': 3, 'direction': 'back', 'position': 'left', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (1, 1), 'installed': True, 'servoIndex': 1, 'color': 'blue',
-     'rotation': -180})
-# back center
-distanceSensors.append(
-    {'sensorID': 4, 'direction': 'back', 'position': 'center', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (2, 0), 'installed': True, 'servoIndex': 2, 'color': 'red',
-     'rotation': 90})
-# back right
-distanceSensors.append(
-    {'sensorID': 5, 'direction': 'back', 'position': 'right', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (2, 1), 'installed': True, 'servoIndex': 2, 'color': 'red',
-     'rotation': -90})
-# left side front
-distanceSensors.append(
-    {'sensorID': 6, 'direction': 'left', 'position': 'front', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (3, 0), 'installed': True, 'servoIndex': 3, 'color': 'red', 'rotation': 0})
-# right side front
-distanceSensors.append(
-    {'sensorID': 7, 'direction': 'right', 'position': 'front', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (3, 1), 'installed': True, 'servoIndex': 3, 'color': 'blue',
-     'rotation': 0})
-# left side back
-distanceSensors.append(
-    {'sensorID': 8, 'direction': 'left', 'position': 'back', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (3, 0), 'installed': True, 'servoIndex': 4, 'color': 'red', 'rotation': 0})
-# right side back
-distanceSensors.append(
-    {'sensorID': 9, 'direction': 'right', 'position': 'back', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (3, 1), 'installed': True, 'servoIndex': 4, 'color': 'blue',
-     'rotation': 0})
 
-
-class Direction(Enum):
+class MoveDirection(Enum):
     STOP = 0
     FORWARD = 1
     FOR_DIAG_RIGHT = 2
@@ -142,11 +94,10 @@ _moveDistanceRequested = 0
 _moveStartX = 0
 _moveStartY = 0
 rotateStartDegrees = 0
-_targetOrientation = 0
 _moveStartTime = None
 _lastCartCommand = ""
 _orientationBeforeMove = 0
-_moveDirection = Direction.STOP
+_moveDirection = MoveDirection.STOP
 
 # Current cart position (center of cart) relative to map center, values in mm
 platformImuYaw = 0
@@ -154,17 +105,40 @@ platformImuYawCorrection = 0
 platformImuPitch = 0.0
 platformImuRoll = 0.0
 
-headImuYaw = 0
-headImuYawCorrection = 0
+headImuYaw = 0              # yaw of head in relation to robot
+# add to cartYaw for getting the orientation in relation to the map
 headImuPitch = 0.0
 headImuRoll = 0.0
+headImuSet = False
+
+###########################################
+# cart status values
+###########################################
+cartStateChanged: bool = False
+
+cartStatus: str = "unknown"
+cartStatusColor = ("black","lightgray")
+
+currentCommand: str = "STOP"
 
 cartLocationX = 0
 cartLocationY = 0
+cartOrientation = 0
+
 cartTargetLocationX = 0
 cartTargetLocationY = 0
+cartTargetOrientation = 0
+
 cartLastPublishTime = time.time()
 lastLocationSaveTime = time.time()
+
+cartSensorUpdate: bool = False
+
+distanceSensorObstacle = "-"
+distanceSensorAbyss = "-"
+
+distanceRequested = 0
+distanceMoved = 0
 
 
 CENTER_OF_CART_ROTATION_X = 0
@@ -181,34 +155,53 @@ taskStarted = time.time()
 _f = None
 
 
-kinectIp = MY_IP
-kinectPort = 20004
-kinectConnection = None
-monitoringWithKinect = False
-firstKinectConnectionAttempt = True
+distanceMonitoring = False
 
-# servoControl connection
-servoControlIp = MY_IP
-servoControlPort = 20004
-servoControlConnection = None
-servoControlConnectionFirstTry = True
+# robotControl connection
+robotControlIp = pcIP
+robotControlPort = 20004
+robotControlConnection = None
+robotControlConnectionFirstTry = True
+
+# ground watch position of head for depth
 pitchGroundWatchDegrees = -35   # head.neck
-yawGroundWatchDegrees = 0      # head.rotate
 
-# wall watch position of head
-pitchWallWatchDegrees = -10   # head.neck
-yawWallWatchDegrees = 0      # head.rotate
+# ahead watch position of head for depth
+pitchAheadWatchDegrees = -15   # head.neck
+
 
 # the depth cam image includes the cart front when looking down
 # use a registered cart front image to locate the cart front in the current image
 # to register a new cart front image delete the existing cart front file and use a situation without obstacles
 # check for the cart front only in the lower half of the image (cartFrontMinRow .. image height)
-cartFrontImage = None
+cartFrontShape = None
+cartFrontLine = None
 cartFrontBorderX = 4
-cartFrontMinRow = 160
+cartFrontRows = 30
+cartFrontSearchRows = 60      # number of rows with expected cart front in ground view
 cartFrontRowShift = 0
 cartFrontColShift = 0
-inForwardMove = False
+
+cartLength2 = 0.29      # meters, distance from cart center to cart front
+robotWidth = 0.6        # meters
+robotWidth2 = robotWidth/2        # meters
+robotHeight = 1.7       # meters
+robotBaseZ = 0.88       # standard table height (could be dynamic, not fully implemented yet)
+robotNeckZ = 0.63       # neck rotation point above base
+robotNeckY = 0.09       # neck position in relation to cart center
+
+D415_FOV_Horizontal = 69.4  # degrees
+D415_FOV_Vertical = 42.5    # degrees
+D415_Rows = 240
+D415_Rows2 = D415_Rows/2
+D415_Cols = 428
+
+D415_Z = 0.095              # meters, cam position above neck axis
+D415_Y = 0.15               # meters, cam distance in front of neck axis
+D415_MountingPitch = -29    # degrees, cam is mounted with a downward pointing angle
+distOffsetCamFromCartFront = 0.1    # meters
+flagInForwardMove = False
+
 
 # def startlog():
 #    logging.basicConfig(filename="cartControl.log", level=logging.INFO, format='%(asctime)s - %(name)s - %(message)s', filemode="w")
@@ -235,7 +228,7 @@ def saveImg(img, frameNr):
 
 
 
-def evalTrigDegrees(orientation, moveDirection: Direction):
+def evalCartDegrees(orientation, moveDirection: MoveDirection):
     """
     set moveDegrees based on moveDirection
     cart orientation 0 is to the right
@@ -243,24 +236,24 @@ def evalTrigDegrees(orientation, moveDirection: Direction):
     :param moveDirection:
     :return:
     """
-    #log(f"evalTrigDegrees, orientation: {orientation}, moveDirection: {moveDirection}")
+    log(f"evalCartDegrees, orientation: {orientation}, moveDirection: {moveDirection}")
 
     moveDegrees = None
-    if moveDirection == Direction.FORWARD:
+    if moveDirection == MoveDirection.FORWARD:
         moveDegrees = 0
-    elif moveDirection == Direction.BACKWARD:
+    elif moveDirection == MoveDirection.BACKWARD:
         moveDegrees = 180
-    elif moveDirection == Direction.LEFT:
+    elif moveDirection == MoveDirection.LEFT:
         moveDegrees = 90
-    elif moveDirection == Direction.RIGHT:
+    elif moveDirection == MoveDirection.RIGHT:
         moveDegrees = -90
-    elif moveDirection == Direction.FOR_DIAG_LEFT:
+    elif moveDirection == MoveDirection.FOR_DIAG_LEFT:
         moveDegrees = 45
-    elif moveDirection == Direction.FOR_DIAG_RIGHT:
+    elif moveDirection == MoveDirection.FOR_DIAG_RIGHT:
         moveDegrees = -45
-    elif moveDirection == Direction.BACK_DIAG_LEFT:
+    elif moveDirection == MoveDirection.BACK_DIAG_LEFT:
         moveDegrees = 135
-    elif moveDirection == Direction.BACK_DIAG_RIGHT:
+    elif moveDirection == MoveDirection.BACK_DIAG_RIGHT:
         moveDegrees = -135
     if moveDegrees is None:
         return None

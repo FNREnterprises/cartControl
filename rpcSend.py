@@ -48,18 +48,19 @@ def publishCartProgress(direction, magnitude, final):
                 config.log(f"exception in publishCartProgress to {c['clientId']}: {e}")
 
 
-def publishLifeSignal(clientId):
+def publishLifeSignal():
 
+    #config.log(f"publishing life signal")
     for c in config.clientList:
+        if c['replyConn'] is not None:
+            try:
+                c['replyConn'].root.exposed_lifeSignalUpdate(config.serverName)
+                #config.log(f"published life signal to {c['clientId']} ", publish = False)
 
-        if c['clientId'] == clientId:
-            if c['replyConn'] is not None:
-                #config.log(f"publishing life signal to {c['clientId']}")
-                try:
-                    c['replyConn'].root.exposed_lifeSignalUpdate(config.MY_NAME)
-                except Exception as e:
-                    c['replyConn'] = None
-                    config.log(f"exception in publishLifeSignal to {c['clientId']}: {e}")
+            except Exception as e:
+                c['replyConn'] = None
+                config.log(f"exception in publishLifeSignal with {c['clientId']}: {e}")
+
 
 
 def publishCartInfo():
@@ -76,7 +77,9 @@ def publishCartInfo():
                     config.cartLocationY,
                     cartControl.getCartYaw(),
                     config.cartMoving,
-                    config.cartRotating)
+                    config.cartRotating,
+                    config.headImuYaw,
+                    config.headImuPitch)
 
             except Exception as e:
                 c['replyConn'] = None

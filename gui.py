@@ -6,6 +6,7 @@ import numpy as np
 import arduinoSend
 import cartControl
 import config
+import distanceSensors
 import move
 
 CANV_WIDTH = 300
@@ -250,18 +251,18 @@ class manualControl:
 
         config.obstacleInfo = []
 
-        r = config.NUM_DISTANCE_SENSORS
+        r = distanceSensors.NUM_DISTANCE_SENSORS
 
         for i in range(r):
-            s = config.distanceSensors[i]
-            d = config.distanceList[i]
+            s = distanceSensors.distanceData[i]
+            d = distanceSensors.distanceList[i]
             sensor = sensors[i]
 
             # check for new data
             if s['newValuesShown']:
                 continue
 
-            cartControl.setSensorDataShown(i, True)
+            distanceSensors.setSensorDataShown(i, True)
             # cartGlobal.log(f"show new sensor data {i}")
 
             # clear area
@@ -287,7 +288,7 @@ class manualControl:
             minRange = 15 - config.FLOOR_MAX_OBSTACLE - 5
             maxRange = 15 + config.FLOOR_MAX_OBSTACLE + 5
             lengthFactor = 1
-            for k in range(config.NUM_MEASUREMENTS_PER_SCAN):
+            for k in range(distanceSensors.NUM_MEASUREMENTS_PER_SCAN):
 
                 # line color depends on distance value
 
@@ -334,9 +335,9 @@ class manualControl:
 
 
     def checkArduinoReady(self):
-        '''
+        """
         this is only called when arduino is not ready yet
-        '''
+        """
         if config.arduinoStatus == 2:
             self.lblInfo.configure(text="cart ready", bg="lawn green", fg="black")
             self.btnRotate.configure(state="normal")
@@ -405,7 +406,7 @@ class manualControl:
         distance = int(self.sbDist.get())
         config.log(f"moveCart requested from cart gui, speed: {cartSpeed}, distance: {distance}")
         #arduinoSend.sendMoveCommand(config.Direction(self.direction), cartSpeed, distance)
-        if move.moveRequest(config.Direction(self.direction), cartSpeed, distance, protected=True):
+        if move.moveRequest(config.MoveDirection(self.direction), cartSpeed, distance, protected=True):
             self.lblCommandValue.configure(text="Move")
         else:
             config.log(f"move failed")
