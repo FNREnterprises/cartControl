@@ -5,95 +5,72 @@ import threading
 import numpy as np
 import psutil
 import simplejson as json
+from typing import Tuple
 import logging
-from rpyc.utils.server import ThreadedServer
+#from rpyc.utils.server import ThreadedServer
 import socket
+from multiprocessing.managers import SyncManager
+from queue import Empty
 
-from PyQt5 import QtGui
-from PyQt5.QtWidgets import QApplication, QMainWindow
 import sys
 
-import cProfile, pstats, io
-from pstats import SortKey
+#import cProfile, pstats, io
+#from pstats import SortKey
 
-import inmoovGlobal
+import marvinglobal.marvinglobal as mg
+
 import config
-import threadWatchConnections
 import arduinoReceive
 import arduinoSend
-import rpcReceive
-import rpcSend
-import gui
+
 import findObstacles
 import threadMonitorForwardMove
-import camImages
-import cartGui
-
-standAloneMode = False  # False -> slave mode,  True -> standalone mode
+#import camImages
+import cart
 
 
-def cartInit():
+def cartInit(verbose:bool):
     """
     try to connect with arduino
     :return:
     """
+    config.log("cart - start arduino message receiver")
+    config.msgThread = threading.Thread(target=arduinoReceive.readMessages, args={})
+    config.msgThread.start()
+
     config.log(f"cartInit")
     config.log("try to open serial connection to arduino on cart (COM5)")
+    config.state.cartStatus = mg.CartStatus.CONNECTING
+    cart.publishState()
+
     arduinoReceive.initSerial("COM5")
 
-    # start serial reader for arduino messages
-    msgThread = threading.Thread(target=arduinoReceive.readMessages, args={})
-    msgThread.start()
 
-    config.log("cart - arduino message receiver thread started")
-
-    #camImages.initCameras()
-
-    # wait for cart startup finished
+    # wait for confirmed message exchange with cart arduino
     config.log(f"cart - wait for first message from arduino ...")
-    timeout = time.time() + 10
-    while config.arduinoStatus == 0 or time.time() < timeout:
+    timeoutWait = time.time() + 10
+    while not config.arduinoConnEstablished and time.time() < timeoutWait:
         time.sleep(0.1)
 
-    if config.arduinoStatus == 0:
-        config.log(f"cart - timeout in arduino connection, terminating")
-        raise SystemExit()
+    if not config.arduinoConnEstablished:
+        config.log(f"cart - could not get message response from Arduino, going down")
+        sys.exit()
 
-    setMovementBlocked(False)
-
-    arduinoSend.setVerbose(False)
-
-    # start cart control gui and initialization
-    #guiThread = threading.Thread(target=gui.startGui, args={})
-    #guiThread.start()
-    #config.log("cart gui started")
+    arduinoSend.setVerbose(verbose)
 
     # send config values to cart
     config.log("initialize cart sensors ...")
     arduinoSend.sendConfigValues()
 
     # get current orientation of cart (bno055)
-    arduinoSend.requestCartOrientation()
+    arduinoSend.requestCartYaw()
     time.sleep(0.1)
     loadCartLocation()
 
     findObstacles.initObstacleDetection()
 
-    # check for cart ready, abort after time limit
-    timeoutReady = time.time() + 5
-    while (not config.cartReady) and (time.time() < timeoutReady):
-        time.sleep(0.1)
 
-    if config.cartReady:
-        rpcSend.publishCartInfo()
-        rpcSend.publishServerReady()
-    else:
-        config.log(f"timeout in cart startup, going down")
-        os._exit(0)
-
-
-
-def updateCartLocation(magnitude, moveDirection, final=False):
+def updateCartLocation(magnitude, final=False):
     """
     based on distance update from the cart's odometer update the current cart position
     cart 0 degrees is to the right
@@ -106,57 +83,45 @@ def updateCartLocation(magnitude, moveDirection, final=False):
     if not final and magnitude == 0:
         return
 
-    if moveDirection not in [config.MoveDirection.ROTATE_LEFT, config.MoveDirection.ROTATE_RIGHT]:
+    if config.movement.moveDirection not in [config.MoveDirection.ROTATE_LEFT, config.MoveDirection.ROTATE_RIGHT]:
 
         # for x/y change calculation we need degrees that start to the right (normal circle)
         # take cart orientation and cart move direction into account
         # cart orientation 0 is to the right
-        trigDegrees = config.evalCartDegrees(getCartYaw(), moveDirection)
+        trigDegrees = config.evalCartDegrees(cart.location.yaw, moveDirection)
         if trigDegrees is not None:
-            config.cartLocationX = config._moveStartX + int(magnitude * np.cos(np.radians(trigDegrees)))
-            config.cartLocationY = config._moveStartY + int(magnitude * np.sin(np.radians(trigDegrees)))
-            config.cartStateChanged = True
+            cart.location.x = config._moveStartX + int(magnitude * np.cos(np.radians(trigDegrees)))
+            cart.location.y = config._moveStartY + int(magnitude * np.sin(np.radians(trigDegrees)))
         else:
             config.log(f"unexpected missing trigDegrees in updateCartLocation, distance: {magnitude}, moveDirection: {moveDirection}, final: {final}")
 
-    rpcSend.publishCartProgress(moveDirection, magnitude, final)
+    #rpcSend.publishCartProgress(moveDirection, magnitude, final)
 
-    if final or time.time() - config.lastLocationSaveTime > 0.2:
+    if final or time.time() - cart.lastLocationSaveTime > 0.2:
+        config.share.updateSharedData(mg.SharedDataUpdate.LOCATION, cart.location)
         saveCartLocation()
 
 
-def getCartYaw():
-    config.cartOrientation =  (config.platformImuYaw + config.platformImuYawCorrection) % 360
-    return config.cartOrientation
 
-
-def calculateCartTargetLocation(orientation, distance, moveDirection: 'config.Direction'):
+def calculateCartTarget(orientation, distance, moveDirection: 'config.Direction'):
 
     # for x/y change calculation we need degrees that start to the right (normal circle)
     # take cart orientation and cart move direction into account
     # cart orientation 0 is straight up
     trigDegrees = config.evalCartDegrees(orientation, moveDirection)
     if trigDegrees is not None:
-        config.cartTargetLocationX = config._moveStartX + int(distance * np.cos(np.radians(trigDegrees)))
-        config.cartTargetLocationY = config._moveStartY + int(distance * np.sin(np.radians(trigDegrees)))
-        config.cartStateChanged = True
-        config.log(f"move - from: {config.cartLocationX:.0f} / {config.cartLocationY:.0f}, orientation: {orientation}, moveDir: {moveDirection}, deg: {trigDegrees:.0f}, dist: {distance}, to: {config.cartTargetLocationX:.0f} / {config.cartTargetLocationY:.0f}")
+        cart.location.targetX = cart.movement.moveStartX + int(distance * np.cos(np.radians(trigDegrees)))
+        cart.location.targetY = cart.movement.moveStartY + int(distance * np.sin(np.radians(trigDegrees)))
+        config.log(f"move - from: {cart.location.x:.0f} / {cart.location.y:.0f}, orientation: {orientation}, moveDir: {moveDirection}, deg: {trigDegrees:.0f}, dist: {distance}, to: {cart.location.carttargetX:.0f} / {cart.location.carttargetY:.0f}")
 
     else:
         config.log(
-            f"unexpected missing trigDegrees in calculateCartTargetLocation, distance: {distance}, moveDirection: {moveDirection}")
+            f"unexpected missing trigDegrees in calculateCarttarget, distance: {distance}, moveDirection: {moveDirection}")
 
-
-def getCartLocation():
-    return round(config.cartLocationX), round(config.cartLocationY)
-
-
-def getMoveStart():
-    return config._moveStartX, config._moveStartY
 
 
 def getRemainingRotation():
-    d = abs(getCartYaw() - config.cartTargetOrientation) % 360
+    d = abs(cart.location.yaw - cart.location.targetYaw) % 360
     return 360 - d if d > 180 else d
 
 
@@ -183,25 +148,15 @@ def updateBatteryStatus():
         config.log(msg)
 
 
-def getVoltage12V():
-    return config._mVolts12V
-
-
-def setVoltage12V(value):
-    config._mVolts12V = value
-
-
-
-
 def saveCartLocation():
     # Saving the objects:
-    cartData = {'posX': int(config.cartLocationX), 'posY': int(config.cartLocationY), 'orientation': getCartYaw()}
-    #if config.cartLocationX == 0 and config.cartLocationY == 0:
+    cartData = {'posX': int(cart.location.x), 'posY': int(cart.location.y), 'yaw': int(cart.location.yaw)}
+    #if cart.location.x == 0 and cart.location.y == 0:
     #    config.log(f"CART LOCATION SAVED AS 0,0")
     filename = f"cartLocation.json"
     with open(filename, "w") as write_file:
         json.dump(cartData, write_file)
-    config.lastLocationSaveTime = time.time()
+    cart.lastLocationSaveTime = time.time()
     #config.log(f"cart location saved")
 
 
@@ -213,222 +168,122 @@ def loadCartLocation():
     :return:
     """
     # Getting back the last saved cart data
+    config.log(f"load cart location")
     filename = f"cartLocation.json"
+    cart.location = mg.Location()
     if os.path.exists(filename):
         with open(filename, "r") as read_file:
             cartData = json.load(read_file)
 
-        config.cartLocationX = cartData['posX']
-        config.cartLocationY = cartData['posY']
-        lastYaw = cartData['orientation']
-        config.platformImuYawCorrection = (lastYaw - config.platformImuYaw) % 360
+        config.location.x = cartData['posX']
+        config.location.y = cartData['posY']
+        config.platformImu.yawCorrection = (cartData['yaw'] - config.platformImu.yaw) % 360
+        config.location.yaw = (cartData['yaw'] + config.platformImu.yawCorrection) % 360
 
     else:
-        config.cartLocationX = 0
-        config.cartLocationY = 0
-        config._cartOrientation = 0
-        lastYaw = 0
-        config.platformImuYawCorrection = 0
+        config.location.x = 0
+        config.location.y = 0
+        config.location.yaw = 0
+        config.platformImu.yawCorrection = 0
 
-    config.log(f"imuYaw: {config.platformImuYaw}, cartYawCorrection: {config.platformImuYawCorrection}, roll: {config.platformImuRoll}, pitch: {config.platformImuPitch}, cartX: {config.cartLocationX}, cartY: {config.cartLocationY}, lastYaw: {lastYaw}")
+    cart.publishPlatformImu()
+    cart.publishLocation()
 
+    config.log(f"imuYaw: {config.platformImu.yaw}," +
+        f"cartYawCorrection: {config.platformImu.yawCorrection}," +
+        f"roll: {config.platformImu.roll}," +
+        f"pitch: {config.platformImu.pitch}, " +
+        f"cartX: {config.location.x}, " +
+        f"cartY: {config.location.y}, " +
+        f"lastYaw: {config.location.yaw}")
 
-def setMovementBlocked(new):
-
-    config._movementBlocked = new
-    config._timeMovementBlocked = time.time()
-
-
-def getMovementBlocked():
-    return config._movementBlocked
-
-
-def getMovementBlockedStartTime():
-    return config._timeMovementBlocked
-
-
-def setRequestedCartSpeed(speed):
-    config._requestedCartSpeed = speed
-
-
-def getRequestedCartSpeed():
-    return config._requestedCartSpeed
-
-
-def setCartMoving(newState, timeout=0):
-
-    # log(f"setCartMoving {new}")
-    config.cartMoving = newState
-    config._cartMoveTimeout = timeout
-
-    config.cartRotating = False
-
-
-def isCartMoving():
-    return config.cartMoving
-
-
-def setCartRotating(new):
-
-    # log(f"setCartRotating {new}")
-    config.cartRotating = new
-    config.cartMoving = False
-
-
-def setCartMoveDistance(distanceMm):
-    config._moveDistanceRequested = distanceMm
-    config._moveStartX = config.cartLocationX
-    config._moveStartY = config.cartLocationY
-    config._moveStartTime = time.time()
 
 
 if __name__ == '__main__':
 
-    config.pcName = socket.gethostname()
-    config.pcIP = socket.gethostbyname(config.pcName)
 
-    ##########################################################
-    # initialization
-    # Logging, renaming old logs for reviewing ...
-    baseName = "log/cartControl"
-    oldName = f"{baseName}9.log"
-    if os.path.isfile(oldName):
-        os.remove(oldName)
-    for i in reversed(range(9)):
-        oldName = f"{baseName}{i}.log"
-        newName = f"{baseName}{i+1}.log"
-        if os.path.isfile(oldName):
-            os.rename(oldName, newName)
-    oldName = f"{baseName}.log"
-    newName = f"{baseName}0.log"
-    if os.path.isfile(oldName):
-        try:
-            os.rename(oldName, newName)
-        except Exception as e:
-            config.log(f"can not rename {oldName} to {newName}")
+    config.share = mg.MarvinShares()
+    if not config.share.sharedDataConnect(config.processName):
+        config.log(f"could not connect with marvinData")
+        os._exit(1)
 
-    logging.basicConfig(
-        filename="log/cartControl.log",
-        level=logging.INFO,
-        format='%(message)s',
-        filemode="w")
+    # add own process to shared process list
+    config.share.updateProcessDict(config.processName)
 
     config.log("cartControl started")
 
-    if standAloneMode:
+    cartInit(verbose=False)
 
-        pr = cProfile.Profile()
+    time.sleep(2)
+    if not 'imageProcessing' in config.share.processDict.keys():
+        config.log(f"cart needs a running imageProcessing, going down")
+        #os._exit(2)
 
-        # start arduino thread
-        config.log(f"start cart initialization thread")
-        startupThread = threading.Thread(target=cartInit, args={})
-        startupThread.setName("cartInit")
-        startupThread.start()
 
-        time.sleep(2)
-        if not camImages.initCameras():
-            config.log(f"could not connect with all cams")
-            exit()
+    # start forward move monitoring thread
+    config.log(f"start forward move monitoring thread")
+    config.navThread = threading.Thread(target=threadMonitorForwardMove.monitorLoop, args={})
+    config.navThread.setName("threadMonitorForwardMove")
+    #config.navThread.start()
 
-        logWaitDone = False
-        while config.arduinoStatus == 0:
-            if not logWaitDone:
-                config.log(f"waiting for first message from arduino")
-                logWaitDone = True
-            time.sleep(1)
 
-        # erase EEPROM to force new calibration of distance sensors with next restart
-        #arduinoSend.distanceSensorCalibration()
+    # check for cart ready, abort after time limit
+    config.log(f'start waiting for cart ready')
+    timeoutWait = time.time() + 5
+    while (not config.cartReady) and (time.time() < timeoutWait):
+        time.sleep(0.1)
 
-        #camImages.cams[inmoovGlobal.EYE_CAM].takeImage(show=False)
-        #camImages.cams[inmoovGlobal.CART_CAM].takeImage(show=False)
-        #camImages.cams[inmoovGlobal.HEAD_CAM].takeImage(show=False)
-        #camImages.cams[inmoovGlobal.HEAD_CAM].takeImage(show=False)
-        arduinoSend.requestCartOrientation()
-        
-        camImages.cams[inmoovGlobal.HEAD_CAM].startStream()
+    if not config.cartReady:
+        config.log(f"cart did not start up in time, going down {config.cartReady=}, {time.time()<timeoutWait=}")
+        #config.navThread.join()
+        #config.msgThread.join()
+        os._exit(1)
 
-        rawPoints = camImages.cams[inmoovGlobal.HEAD_CAM].takeDepth()
-        if rawPoints is None:
-            config.log(f"could not acquire the depth points")
+    config.log(f"wait for cart requests")
+
+    #######################
+    # send an initial request for testing
+    #######################
+    cmd = {'cmd':mg.CART_TEST_SENSOR, 'sensorId': 0}
+    config.share.cartRequestQueue.put(cmd)
+    ###############################
+
+    while True:
+        try:
+            request = config.share.cartRequestQueue.get(timeout=1)
+        except TimeoutError:
+            config.share.updateProcessDict(config.processName)
+            continue
+        except Empty:
+            continue
+        except Exception as e:
+            config.log(f"connection with sharedData lost {e=}, going down")
+            os._exit(2)
+
+        cmd = request['cmd']
+        if cmd == mg.CART_MOVE:
+            #{'cmd': CART_MOVE, 'direction': direction, 'speed': speed, 'distance': distance, 'protected': protected}
+            arduinoSend.sendMoveCommand(request['direction'], request['speed'], request['distance'], request['protected'])
+
+        elif cmd == mg.CART_ROTATE:
+            #{'cmd': CART_ROTATE, 'relAngle': , 'speed': speed, 'distance': distance, 'protected': protected})
+            arduinoSend.sendRotateCommand(request['relAngle'], request['speed'])
+
+        elif cmd == mg.CART_SET_FLOOR_DISTANCES:
+            #{'cmd': CART_SET_FLOOR_DISTANCES, 'sensorId', 'values'})
+            arduinoSend.setFloorDistances(request['sensorId'])
+
+        elif cmd == mg.CART_TEST_SENSOR:
+            #{'cmd': CART_TEST_SENSOR, 'sensorId'})
+            config.sensorTestData.numMeasures = 0
+            config.sensorTestData.sumMeasures = np.zeros((mg.NUM_SCAN_STEPS), dtype=np.int16)
+            arduinoSend.testSensorCommand(request['sensorId'])
+
+        elif cmd == mg.CART_SET_VERBOSE:
+            arduinoSend.setVerbose(request['newState'])
 
         else:
-            camView = "ground"
-            if camView == "ground":
-                # with cam in ground view position
-                #pr.enable()
-                rotatedPoints = camImages.alignPointsWithGround(rawPoints, config.headImuPitch)
-                distClosestObstacle, obstacleDirection = findObstacles.distGroundObstacles(rotatedPoints)
-                #pr.disable()
+            config.log(f"unknown cart request {request=}")
 
-            if camView == "ahead":
-                # with cam in ahead watch position
-                # handleRobot. inmoovGlobal.pitchWallWatchDegrees
-                rotatedPoints = camImages.alignPointsWithGround(rawPoints, inmoovGlobal.pitchWallWatchDegrees)
-                freeMoveDistance, obstacleDirection = findObstacles.lookForCartPathObstacle(rotatedPoints)
-
-            if camView == "wall":
-                config.log(f"obstacle in path: freeMoveDistance: {freeMoveDistance:.3f}, obstacleDirection: {obstacleDirection:.1f}")
-                rotatedPoints = camImages.alignPointsWithGround(rawPoints, inmoovGlobal.pitchWallWatchDegrees)
-                obstacleLine = findObstacles.findObstacleLine(rotatedPoints)
-
-        camImages.cams[inmoovGlobal.HEAD_CAM].stopStream()
-
-        '''
-        s = io.StringIO()
-        sortby = SortKey.CUMULATIVE
-        ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
-        ps.print_stats()
-        print(s.getvalue())
-        '''
-        exit()
-
-
-    if not standAloneMode:
-
-        # start arduino thread
-        config.log(f"start cart initialization thread")
-        startupThread = threading.Thread(target=cartInit, args={})
-        startupThread.setName("cartInit")
-        startupThread.start()
-
-        time.sleep(2)
-        if not camImages.initCameras():
-            config.log(f"could not connect with all cams")
-            exit()
-
-        logWaitDone = False
-        while config.arduinoStatus == 0:
-            if not logWaitDone:
-                config.log(f"waiting for first message from arduino")
-                logWaitDone = True
-            time.sleep(1)
-
-        # start forward move monitoring thread
-        config.log(f"start forward move monitoring thread")
-        navThread = threading.Thread(target=threadMonitorForwardMove.monitorLoop, args={})
-        navThread.setName("threadMonitorForwardMove")
-        navThread.start()
-
-        # start communication watchdog thread
-        config.log(f"start rpyc communication watchdog")
-        navThread = threading.Thread(target=threadWatchConnections.watchDog, args={})
-        navThread.setName("threadWatchConnections")
-        navThread.start()
-
-        # start listener for rpc commands, does not return
-        #config.log(f"start listening for rpyc commands on port {config.MY_RPC_PORT}")
-        #myConfig = {"allow_all_attrs": True, "allow_pickle": True}
-        #server = ThreadedServer(rpcReceive.rpcListener, port=config.MY_RPC_PORT, protocol_config=myConfig)
-        #server.start()
-
-        config.log(f"start listening for rpyc commands on port {config.MY_RPC_PORT}")
-        server = ThreadedServer(rpcReceive.rpcListener(), port=config.MY_RPC_PORT,
-                                protocol_config={'allow_public_attrs': True})
-        rpycThread = threading.Thread(target=server.start)
-        rpycThread.name = "rpycListener"
-        rpycThread.start()
-
-        cartGui.startGui()
 
 

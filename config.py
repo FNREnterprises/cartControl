@@ -3,53 +3,33 @@ import time
 import datetime
 import sys
 import cv2
-from enum import Enum, unique
 import logging
+import marvinglobal.marvinglobal as mg
 
-from PyQt5.QtCore import Qt
+processName = 'cartControl'
+share:mg.MarvinShares = None   # shared data
 
-serverName = 'cartControl'
-serverReady = False
+state = mg.State()
+location = mg.Location()
+movement = mg.Movement()
+sensorTestData = mg.SensorTestData()
+floorOffset = mg.FloorOffset()
+obstacleDistance = mg.ObstacleDistance()
+platformImu = mg.ImuData()
+headImu = mg.ImuData()
+battery6V = mg.Battery(5)
+battery12V = mg.Battery(10)
+
+simulateArduino = True
 
 # configuration values for cart arduino infrared distance limits
-FLOOR_MAX_OBSTACLE = 3  # cm
-FLOOR_MAX_ABYSS = 4     # cm
-delayBetweenDistanceMeasurements = 2    # value 1 caused unstable analog read values from distance sensor (2.4.2019)
-finalDockingMoveDistance = 12            # distance to move forward after seeing activated docking switch
-
-cartDocked = False
-
-# currently set by auto calibration in cart
-#                              FL     FR    L   R    BL     BR
-#                             n  f   n  f   n   n   n  f   n  f
-#distanceSensorCorrections = [-1,-5,  4,-5,  4,  3,  5, 8,  5, -1]
-
-d415Cfg = None
-d415Handle = None
-
-##################################################################
-# needs to be the same as in navManager
-##################################################################
-@unique
-class cMoveState(Enum):
-    """
-    list of move states for single move and move sequence
-    """
-    PENDING = 0
-    IN_PROGRESS = 1
-    INTERRUPTED = 2
-    FINISHED = 3
-    FAILED = 4
-
-
-##################################################################
-# cartControl can run as slave of navManager or in standalone mode
-##################################################################
-pcName = None
-pcIP = None
-MY_RPC_PORT = 20001
-
-taskName = 'cartControl'
+DISTANCE_UNKNOWN = 999
+FLOOR_MAX_OBSTACLE = 15  # mm
+FLOOR_MAX_ABYSS = 20     # mm
+NUM_REPEATED_MEASURES = 7
+DELAY_BETWEEN_ANALOG_READS = 20         # value 1 caused unstable analog read values from distance sensor (2.4.2019)
+MIN_SCAN_CYCLE_DURATION = 80            # when moving maintain a minimal delay between sensor reads
+finalDockingMoveDistance = 12           # distance to move forward after seeing activated docking switch
 
 
 # values for arduino to calculate distance mm/s from speed value
@@ -59,86 +39,25 @@ SPEED_OFFSET = 44.6
 SPEED_FACTOR_SIDEWAY = 0.5
 SPEED_FACTOR_DIAGONAL = 0.63
 
-
 obstacleInfo = []
 
+# flags for gui update sections
+floorOffsetDataChanged: bool = False
+distanceDataChanged: bool = False
 
-streamD415 = None
-D415streaming = False
-
-
-class MoveDirection(Enum):
-    STOP = 0
-    FORWARD = 1
-    FOR_DIAG_RIGHT = 2
-    FOR_DIAG_LEFT = 3
-    LEFT = 4
-    RIGHT = 5
-    BACKWARD = 6
-    BACK_DIAG_RIGHT = 7
-    BACK_DIAG_LEFT = 8
-    ROTATE_LEFT = 9
-    ROTATE_RIGHT = 10
-
-
-# odometry is only active when cart is moving
-cartMoving = False
-_cartMoveTimeout = 0
-cartRotating = False
-_requestedCartSpeed = 0
-_cartSpeedFromOdometry = 0
-
-_movementBlocked = False
-_timeMovementBlocked = None
-_moveDistanceRequested = 0
-_moveStartX = 0
-_moveStartY = 0
-rotateStartDegrees = 0
-_moveStartTime = None
-_lastCartCommand = ""
-_orientationBeforeMove = 0
-_moveDirection = MoveDirection.STOP
 
 # Current cart position (center of cart) relative to map center, values in mm
-platformImuYaw = 0
-platformImuYawCorrection = 0
-platformImuPitch = 0.0
-platformImuRoll = 0.0
+#platformImuYaw = 0
+#platformImuYawCorrection = 0
+#platformImuPitch = 0.0
+#platformImuRoll = 0.0
 
-headImuYaw = 0              # yaw of head in relation to robot
+#headImuYaw = 0              # yaw of head in relation to robot
 # add to cartYaw for getting the orientation in relation to the map
-headImuPitch = 0.0
-headImuRoll = 0.0
-headImuSet = False
+#headImuPitch = 0.0
+#headImuRoll = 0.0
+#headImuSet = False
 
-###########################################
-# cart status values
-###########################################
-cartStateChanged: bool = False
-
-cartStatus: str = "unknown"
-cartStatusColor = ("black","lightgray")
-
-currentCommand: str = "STOP"
-
-cartLocationX = 0
-cartLocationY = 0
-cartOrientation = 0
-
-cartTargetLocationX = 0
-cartTargetLocationY = 0
-cartTargetOrientation = 0
-
-cartLastPublishTime = time.time()
-lastLocationSaveTime = time.time()
-
-cartSensorUpdate: bool = False
-
-distanceSensorObstacle = "-"
-distanceSensorAbyss = "-"
-
-distanceRequested = 0
-distanceMoved = 0
 
 
 CENTER_OF_CART_ROTATION_X = 0
@@ -147,7 +66,7 @@ CENTER_OF_CART_ROTATION_Y = -30
 _lastBatteryCheckTime = time.time()
 _batteryStatus = None
 arduino = None
-arduinoStatus = 0
+arduinoConnEstablished = 0
 _mVolts12V = 0
 _mVolts6V = 0
 
@@ -158,10 +77,13 @@ _f = None
 distanceMonitoring = False
 
 # robotControl connection
-robotControlIp = pcIP
-robotControlPort = 20004
-robotControlConnection = None
-robotControlConnectionFirstTry = True
+robotControlIp = '192.168.0.35'
+robotControlAuthKey = b'marvin'
+servoRequestQueue = None
+servoStaticDict = None
+servoCurrentDict = None
+#robotControlConnection = None
+#robotControlConnectionFirstTry = True
 
 # ground watch position of head for depth
 pitchGroundWatchDegrees = -35   # head.neck
@@ -202,13 +124,16 @@ D415_MountingPitch = -29    # degrees, cam is mounted with a downward pointing a
 distOffsetCamFromCartFront = 0.1    # meters
 flagInForwardMove = False
 
-
-# def startlog():
-#    logging.basicConfig(filename="cartControl.log", level=logging.INFO, format='%(asctime)s - %(name)s - %(message)s', filemode="w")
 cartReady = False
 clientList = []
 
-import rpcSend      # problem when importing at start of file in gui.py
+
+# threads
+startupThread = None
+msgThread = None
+navThread = None
+
+
 
 def log(msg, publish=True):
 
@@ -217,7 +142,8 @@ def log(msg, publish=True):
     print(f"{logtime} - {msg}")
 
     if publish:
-        rpcSend.publishLog("cartControl - " + msg)
+        # forward to central logger, not used yet
+        pass
 
 
 def saveImg(img, frameNr):
@@ -225,40 +151,6 @@ def saveImg(img, frameNr):
         cv2.imwrite(f"C:/cartControl/floorImages/floor_{frameNr}.jpg", img)
     except:
         log(f"cartGlobal, saveImg exception {sys.exc_info()[0]}")
-
-
-
-def evalCartDegrees(orientation, moveDirection: MoveDirection):
-    """
-    set moveDegrees based on moveDirection
-    cart orientation 0 is to the right
-    :param orientation:
-    :param moveDirection:
-    :return:
-    """
-    log(f"evalCartDegrees, orientation: {orientation}, moveDirection: {moveDirection}")
-
-    moveDegrees = None
-    if moveDirection == MoveDirection.FORWARD:
-        moveDegrees = 0
-    elif moveDirection == MoveDirection.BACKWARD:
-        moveDegrees = 180
-    elif moveDirection == MoveDirection.LEFT:
-        moveDegrees = 90
-    elif moveDirection == MoveDirection.RIGHT:
-        moveDegrees = -90
-    elif moveDirection == MoveDirection.FOR_DIAG_LEFT:
-        moveDegrees = 45
-    elif moveDirection == MoveDirection.FOR_DIAG_RIGHT:
-        moveDegrees = -45
-    elif moveDirection == MoveDirection.BACK_DIAG_LEFT:
-        moveDegrees = 135
-    elif moveDirection == MoveDirection.BACK_DIAG_RIGHT:
-        moveDegrees = -135
-    if moveDegrees is None:
-        return None
-    else:
-        return (orientation + moveDegrees) % 360  # make 0 degrees pointing to the right
 
 
 def getSensorName(sensorID):

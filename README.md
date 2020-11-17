@@ -53,19 +53,3 @@ This in a separate project
 * exposed_requestLifeSignal
 * exposed_terminate
 
-#### Cart Control
-* exposed_move
-* exposed_rotateRelative
-* exposed_stop
-* exposed_setCartLocation
-* exposed_adjustCartPosition
-* exposed_getCartInfo(self)
-* exposed_requestCartOrientation(self):
-* exposed_getObstacleInfo(self):
-* exposed_getBatteryStatus(self):
-* exposed_isCartMoving(self):
-* exposed_isCartRotating(self):
-* exposed_obstacleUpdate(self, data):
-* exposed_lifeSignalUpdate(self, server):
-* exposed_requestHeadOrientation(self):
-* exposed_requestD415Depth

@@ -4,20 +4,21 @@ import sys
 import time
 import serial
 import subprocess
-
+from typing import Tuple
 from PyQt5.QtCore import Qt
 
-import gui
+#import gui
+import marvinglobal.marvinglobal as mg
 import config
 import arduinoSend
 import cartControl
-import rpcSend
+#import rpcSend
 import distanceSensors
-
+import cart
 
 def initSerial(comPort):
 
-    config.arduinoStatus = 0
+    config.arduinoConnEstablished = False
     reconnectionTried = False
 
     while True:
@@ -39,8 +40,8 @@ def initSerial(comPort):
 
             config.log(f"exception on serial connect with {comPort} {e}")
             config.log(f"trying to reattach COM5")
-            subprocess.call("c:/utils/devcon.exe remove @USB\VID_2341*")
-            subprocess.call("c:/utils/devcon.exe rescan")
+            subprocess.call("c:/utils/devcon.exe enable @USB\VID_2341&PID_0042\95432313338351718151")
+
             reconnectionTried = True
 
 
@@ -70,8 +71,8 @@ def readMessages():
                 config.log(f"problem with decoding cart msg '{recvB}' {e}")
                 continue
 
-            if config.arduinoStatus == 0:
-                config.arduinoStatus = 1        # first message from arduino received
+            if not config.arduinoConnEstablished:
+                config.arduinoConnEstablished = True        # first message from arduino received
                 #config.log("initialize cart sensors ...")
                 #arduinoSend.sendConfigValues()
 
@@ -81,40 +82,38 @@ def readMessages():
             # cartGlobal.log("in read message: ", msgID)
 
             if msgID == "!A0":  # "cart ready"
-                config.arduinoStatus = 2                # cart has started up
                 config.log("!A0 received, cart ready")
-                config.log("")
+                config.log("----------")
                 config.cartReady = True
-                config.cartStatus = "CART READY"
-                config.cartStatusColor = ("black", "lightgreen")
+                config.state.cartStatus = mg.CartStatus.READY
+                cart.publishState()
 
-
-            elif msgID == "!A1":  # distance values from obstacle sensors
+            elif msgID == "!A1":  # floor offsets from infrared sensors
                 # !A1,<sensorID>,<ANZ_MESSUNGEN_PRO_SCAN>,[ANZ_MESSUNGEN_PRO_SCAN<value>,]
-                config.log(f"{recv}", publish=False)
+                #þconfig.log(f"{recv}", publish=False)
                 messageItems = [int(e) if e.isdigit() else e for e in recv.split(',')]
-                distanceSensors.updateDistances(messageItems)
-                config.cartSensorUpdate = True
+                distanceSensors.updateFloorOffset(messageItems)
 
 
             elif msgID == "!A2":  # "obstacle:":
-                # !A2,<distance>,<limit>,<sensorName>
+                # !A2,<t<pe>,<distance>,<limit>,<sensorName>
                 sensorID = 0
                 try:
                     items = recv.split(",")
-                    distance= int(items[1])
-                    limit= int(items[2])
-                    sensorName = items[3]
+                    type = int(items[1])
+                    distance= int(items[2])
+                    limit= int(items[3])
+                    sensorId = items[4]
 
                 except Exception as e:
                     config.log(f"exception with message: '{recv}', error in message structure {e}")
                     continue
 
-                config.log(f"!A2 obstacle detected, height: {distance} > limit: {limit}, sensor: {sensorName}", publish=cartControl.getMovementBlocked())
-                cartControl.setMovementBlocked(True)
+                #config.log(f"!A2 obstacle detected, height: {distance} > limit: {limit}, sensor: {sensorId}")
 
-                config.sensorDistanceObstacle = str(distance)
-                config.cartStateChanged = True
+                cart.movement.distanceSensorObstacle = str(distance)
+                cart.movement.sensorIdObstacle = sensorId
+                cart.publishMovement()
 
 
             elif msgID == "!A3":  # "abyss:":
@@ -123,127 +122,72 @@ def readMessages():
                     items = recv.split(",")
                     distance = int(items[1])
                     limit = int(items[2])
-                    sensorName = items[3]
+                    sensorId = items[3]
+
                 except Exception as e:
                     config.log(f"exception with message: '{recv}', error in message structure {e}")
                     continue
 
-                config.log(f"!A3 abyss detected, measured dist: {distance} > limit: {limit}, sensor: {sensorName}", publish=cartControl.getMovementBlocked())
-
-                cartControl.setMovementBlocked(True)
-
-                config.sensorDistanceAbyss = str(distance)
-                config.cartStateChanged = True
-
-                #gui.controller.updateDistanceSensorAbyss(distance, sensorName)
-                #gui.controller.updateDistanceSensorObstacle("", -1)
+                config.log(f"!A3 abyss detected, measured dist: {distance} > limit: {limit}, sensor: {sensorId}")
+                cart.movement.distanceSensorAbyss = str(distance)
+                cart.movement.sensorIdAbyss = sensorId
+                cart.publishMovement()
 
 
             elif msgID == "!A4":  # free path after move blocked
                 config.log(f"!A4 free path after blocked move")
-                cartControl.setMovementBlocked(False)
-                gui.controller.updateDistanceSensorAbyss("", -1)
-                gui.controller.updateDistanceSensorObstacle("", -1)
+                cart.movement.distanceSensorObstacle = "-"
+                cart.movement.distanceSensorAbyss = "-"
+                cart.publishMovement()
 
 
-            elif msgID == "!A5":  # "cart stopped":
-                # !A5,<orientation>,<distance moved>,<moveDirection>,<reason>
+            elif msgID == "!A5":  # "rotation stopped":
+                # !A5,<currentYaw>,<reason>
                 items = recv.split(",")
-                config.platformImuYaw = round(float(items[1]))
-                distanceMoved = int(items[2])
-                moveDirection = config.MoveDirection(int(items[3]))
-                reason = items[4]
-
-                cartControl.setMovementBlocked(False)
-                cartControl.setCartRotating(False)
-                cartControl.setCartMoving(False)
-                config.flagInForwardMove = False    # stop monitoring with depth cam
-                config.currentCommand = "STOP"
-                config.cartStateChanged = True
-
-                if moveDirection not in [config.MoveDirection.ROTATE_LEFT, config.MoveDirection.ROTATE_RIGHT]:
-                    magnitude = distanceMoved
-                else:
-                    magnitude = abs(config.signedAngleDifference(config.rotateStartDegrees, cartControl.getCartYaw()))
-                cartControl.updateCartLocation(magnitude, moveDirection, final=True)
-
+                yaw = round(float(items[1]))
+                stopReason = items[2]
+                cart.terminateRotation(stopReason)
                 #config.log("<-A " + recv, publish=False)  # stop and reason
-                config.log(f"!A5 cart stopped, {reason}")
-
-                # if distance monitoring is enabled try to stop it
-                if config.distanceMonitoring:
-                    config.distanceMonitoring = False
+                config.log(f"!A5 cart rotation stopped, {stopReason}")
 
 
-            elif msgID == "!Aa":  # cart position/orientation update:
-                # !Aa,<imuYaw>, <distance moved in mm>, <moveDirection>
-                #config.log(f"!Aa, cartUpdate: {recv}", publish=False)
+            elif msgID == "!A6":  # movement stopped
+                # !A6,<orientation>,<distance moved>,<reason>
                 items = recv.split(",")
-                config.platformImuYaw = round(float(items[1]))
-                config.distanceMoved = round(float(items[2]))
-                moveDirection = config.MoveDirection(int(items[3]))
+                yaw = round(float(items[1]))
+                distanceMoved = int(items[2])
+                stopReason = items[3]
 
-                if moveDirection not in [config.MoveDirection.ROTATE_LEFT, config.MoveDirection.ROTATE_RIGHT]:
-                    magnitude = config.distanceMoved
-                else:
-                    magnitude = abs(config.signedAngleDifference(config.rotateStartDegrees, cartControl.getCartYaw()))
-
-                if moveDirection == config.MoveDirection.STOP:
-                    if config.distanceMoved > 0:
-                        config.log(f"cart stopped but distance moved: {distanceMoved}, cart position might be wrong")
-                else:
-                    cartControl.updateCartLocation(magnitude, moveDirection, final=False)
+                cart.terminateMove(distanceMoved, yaw, stopReason)
 
 
-            elif msgID == "!Ab":  # bno055 platform sensor update:
-                # !Ab,<yaw>,<roll>, <pitch>
-                items = recv.split(",")
-                config.platformImuYaw = 360 - round(float(items[1]) / 1000.0)
-                config.platformImuRoll = float(items[2]) / 1000.0
-                config.platformImuPitch = float(items[3]) / 1000.0
-                config.log(f"!Ab, platformImu yaw: {config.platformImuYaw}, roll: {config.platformImuRoll}, pitch: {config.platformImuPitch}", publish=False)
-                config.cartOrientation = config.platformImuYaw + config.platformImuYawCorrection
-                config.cartStateChanged = True
-
-            elif msgID == "!Ac":  # bno055 head sensor update:
-                # !Ab,<milliYaw>,<milliRoll>, <milliPitch>
-                items = recv.split(",")
-                config.headImuYaw = round(float(items[1]) / 1000.0)
-                config.headImuRoll = float(items[2]) / 1000.0
-                config.headImuPitch = float(items[3]) / 1000.0
-                config.headImuSet = True
-                config.log(f"!Ac, headImu, yaw: {config.headImuYaw}, roll: {config.headImuRoll}, pitch: {config.headImuPitch}", publish=False)
-
-            elif msgID == "!A6":  # cart docked
-                # Arduino triggers the relais for loading batteries through the docking contacts
-                # gui update by heartbeat logic
-                config.log("cart docked")
-                config.cartDocked = True
-                rpcSend.cartDocked(True)
-
-
-            elif msgID == "!A7":  # cart undocked
-                # Arduino releases the relais for loading batteries through the docking contacts
-                config.log("cart undocked")
-                config.cartDocked = False
-                rpcSend.cartDocked(False)
+            elif msgID == "!A7":  # measured distances of infrared sensor
+                # !A7,<sensorID>,<ANZ_MESSUNGEN_PRO_SCAN>,[ANZ_MESSUNGEN_PRO_SCAN<value>,]
+                config.log(f"{recv}", publish=False)
+                messageItems = [int(e) if e.isdigit() else e for e in recv.split(',')]
+                distanceSensors.updateSensorTestData(messageItems)
 
 
             elif msgID == "!A8":  # 12 V supply, measured value
                 config.log(f"{recv} received")
+                newVoltage12V = 0
                 try:
                     newVoltage12V = round(float(recv.split(",")[1]))
                 except Exception as e:
                     config.log("!A8 not able to retrieve voltage value {recv}, {e}")
-                    newVoltage12V = cartControl.getVoltage12V()
 
-                # test for change in Voltage
-                if abs(newVoltage12V - cartControl.getVoltage12V()) > 500:
-                    cartControl.setVoltage12V(newVoltage12V)
+                # test for significant change in Voltage
+                if abs(config.state.Voltage12V - newVoltage12V) > 500:
+                    config.state.Voltage12V = newVoltage12V
                     config.log(f"new 12V voltage read [mV]: {newVoltage12V}")
+                    updStmt:Tuple[int,mg.State] = (mg.SharedDataUpdate.CART_STATE, config.state)
+                    config.share.updateSharedData(updStmt)
 
 
             elif msgID == "!A9":  # orientation x:":
+                config.log(f"legacy !A9 message received, should be !Ah or !Ai")
+
+                """
                 # !A9,<orientation>
                 try:
                     items = recv.split(",")
@@ -252,34 +196,89 @@ def readMessages():
                     newPitch = float(items[3])
                 except Exception as e:
                     config.log("!A9 not able to retrieve imu values {recv}, {e}")
-                    newOrientation = cartControl.getCartYaw()
+                    newOrientation = config.location.yaw
 
                 # test for change of orientation
-                if config.platformImuYaw != newYaw:
-                    config.platformImuYaw = newYaw
+                if config.platformImu.yaw != newYaw:
+                    config.platformImu.yaw = newYaw
+                    config.location.yaw = newYaw + config.platformImu.yawCorrection
                     # cartGlobal.log(f"new cart orientation: {newOrientation}")
 
-                    # if cart is in rotation no blocking exists
-                    if cartControl.getMovementBlocked():
-                        cartControl.setMovementBlocked(False)
+                if config.platformImu.roll != newRoll:
+                    config.platformImu.roll = newRoll
+                    config.log(f"new roll value: {config.platformImu.roll}")
 
-                if config.platformImuRoll != newRoll:
-                    config.platformImuRoll = newRoll
-                    config.log(f"new roll value: {config.platformImuRoll}")
-
-                if config.platformImuPitch != newPitch:
-                    config.platformImuPitch = newPitch
-                    config.log(f"new pitch value: {config.platformImuPitch}")
+                if config.platformImu.pitch != newPitch:
+                    config.platformImu.pitch = newPitch
+                    config.log(f"new pitch value: {config.platformImu.pitch}")
 
                 # no new orientation, check for blocked movement and stop cart
                 else:
-                    blocked = cartControl.getMovementBlocked()
-                    if blocked:
-                        if time.time() - cartControl.getMovementBlockedStartTime() > 3:
-                            if config.cartMoving:
+                    if config.movement.blocked:
+                        if time.time() - config.movement.blockedStartTime() > 3:
+                            if config.state.cartMoving:
                                 # cartGlobal.log("cart stopped by MovementBlocked")
                                 arduinoSend.sendStopCommand("blocked movement")
-                                cartControl.setMovementBlocked(False)
+                """
+
+            elif msgID == "!Aa":  # cart position update:
+                # !Aa, <currentYaw>, <distance moved in mm>
+                items = recv.split(",")
+                cart.location.yaw = round(float(items[1]))
+                cart.updateCartLocation(round(float(items[2])))
+
+            elif msgID == "!Ab":  # cart rotation update:
+                # !Aa, <currentYaw>
+                items = recv.split(",")
+                cart.location.yaw = round(float(items[1]))
+                cart.movement.updateCartRotation()
+
+
+            elif msgID == "!Ad":  # cart docked
+                # Arduino triggers the relais for loading batteries through the docking contacts
+                # gui update by heartbeat logic
+                config.log("cart docked")
+                config.state.cartDocked = True
+                cart.publishState()
+
+
+            elif msgID == "!Ae":  # cart undocked
+                # Arduino releases the relais for loading batteries through the docking contacts
+                config.log("cart undocked")
+                config.state.cartDocked = False
+                cart.publishState()
+
+
+            elif msgID == "!Af":  # distances from ultrasonic sensors
+                # The sensors see only obstacles, 0 means no echo received or obstacles too far away
+                config.log("ultrasonic sensor results")
+                messageItems = [int(e) if e.isdigit() else e for e in recv.split(',')]
+                distanceSensors.updateFreeFrontRoom(messageItems)
+
+
+            elif msgID == "!Ah":  # bno055 platform sensor update:
+                # !Ab,<yaw>,<roll>, <pitch>
+                items = recv.split(",")
+                config.platformImu.yaw = 360 - round(float(items[1]) / 1000.0)
+                config.platformImu.roll = float(items[2]) / 1000.0
+                config.platformImu.pitch = float(items[3]) / 1000.0
+                config.platformImu.updateTime = time.time()
+                cart.publishPlatformImu()
+
+                config.log(f"!Ah, platformImu yaw: {config.platformImu.yaw}, roll: {config.platformImu.roll}, pitch: {config.platformImu.pitch}", publish=False)
+                config.location.yaw = (config.platformImu.yaw + config.platformImu.yawCorrection) % 360
+                cart.publishState()
+
+            elif msgID == "!Ai":  # bno055 head sensor update:
+                # !Ab,<milliYaw>,<milliRoll>, <milliPitch>
+                items = recv.split(",")
+                config.headImu.yaw = round(float(items[1]) / 1000.0)
+                config.headImu.roll = float(items[2]) / 1000.0
+                config.headImu.pitch = float(items[3]) / 1000.0
+                config.headImu.updateTime = time.time()
+                cart.publishHeadImu()
+                config.log(f"!Ai, headImu, yaw: {config.headImu.yaw}, roll: {config.headImu.roll}, pitch: {config.headImu.pitch}", publish=False)
+
 
             else:
                 try:
@@ -290,18 +289,19 @@ def readMessages():
             # cartGlobal.log("msg processed")
 
         # monitor move timeout
-        if config.cartMoving and time.time() > config._cartMoveTimeout:
-            arduinoSend.sendStopCommand("timeout in move")
+        if config.state.cartMoving:
+            if time.time() > config.movement.moveStartTime + config.movement.maxDuration:
+                arduinoSend.sendStopCommand("timeout in move")
 
         # check for docked and batteries loaded
-        if config.cartDocked:
+        if config.state.cartDocked:
             # check battery status of laptop
             if time.time() - cartControl.getLastBatteryCheckTime() > 5:
                 cartControl.updateBatteryStatus()
                 if config._batteryStatus.percent == 100:
 
                     # undock the cart
-                    arduinoSend.sendMoveCommand(config.MoveDirection.BACKWARD, 100, 200)
+                    cart.initiateMove(mg.MoveDirection.BACKWARD, 100, 200)
 
                     # and go to sleep
                     os.system("rundll32.exe powrprof.dll,SetSuspendState 0,1,0")

@@ -4,9 +4,9 @@
 import numpy as np
 import cv2
 
-import inmoovGlobal
+#import inmoovGlobal
 import config
-import camImages
+#import camImages
 
 # x = left/right
 # y = front/back
@@ -14,8 +14,8 @@ import camImages
 
 
 def crop_boolMat(boolMat):
-    # img is 2D array with true/false
-    # remove false only rows and cols from array
+    # boolMAt is a 2D array with true/false
+    # remove false only rows and false only cols from array
     coords = np.argwhere(boolMat)
     x_min, y_min = coords.min(axis=0)
     x_max, y_max = coords.max(axis=0)
@@ -25,6 +25,7 @@ def crop_boolMat(boolMat):
 def initObstacleDetection():
 
     # try to load the registred cart front image
+    config.log(f"load cart front shape")
     try:
         with open(r'cartFrontLine.npy', 'rb') as npFile:
             config.cartFrontLine = np.load(npFile)     # boolean array

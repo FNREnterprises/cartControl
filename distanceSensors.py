@@ -3,88 +3,110 @@ import time
 import numpy as np
 
 import config
+import marvinglobal.marvinglobal as mg
+import cart
 
-NUM_DISTANCE_SENSORS = 10
-NUM_MEASUREMENTS_PER_SCAN = 11
+sensorInTest = None
 
-distanceList = np.zeros((NUM_DISTANCE_SENSORS, NUM_MEASUREMENTS_PER_SCAN), dtype=np.int16)
-
-distanceData = []
+irDistanceSensorDefinitions = []
 # front left
-distanceData.append(
-    {'sensorID': 0, 'direction': 'forward', 'position': 'left', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (0, 0), 'installed': True, 'servoIndex': 0, 'color': 'red',
-     'rotation': -180})
+irDistanceSensorDefinitions.append(
+    {'sensorID': 0, 'direction': 'forward', 'position': 'left', 'installed': True, 'servoIndex': 0})
 # front center
-distanceData.append(
-    {'sensorID': 1, 'direction': 'forward', 'position': 'center', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (0, 1), 'installed': True, 'servoIndex': 0, 'color': 'blue',
-     'rotation': -180})
+irDistanceSensorDefinitions.append(
+    {'sensorID': 1, 'direction': 'forward', 'position': 'center', 'installed': True, 'servoIndex': 1})
 # front right
-distanceData.append(
-    {'sensorID': 2, 'direction': 'forward', 'position': 'right', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (1, 0), 'installed': True, 'servoIndex': 1, 'color': 'red',
-     'rotation': -180})
+irDistanceSensorDefinitions.append(
+    {'sensorID': 2, 'direction': 'forward', 'position': 'right', 'installed': True, 'servoIndex': 2})
 # back left
-distanceData.append(
-    {'sensorID': 3, 'direction': 'back', 'position': 'left', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (1, 1), 'installed': True, 'servoIndex': 1, 'color': 'blue',
-     'rotation': -180})
+irDistanceSensorDefinitions.append(
+    {'sensorID': 3, 'direction': 'back', 'position': 'left', 'installed': True, 'servoIndex': 3})
 # back center
-distanceData.append(
-    {'sensorID': 4, 'direction': 'back', 'position': 'center', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (2, 0), 'installed': True, 'servoIndex': 2, 'color': 'red',
-     'rotation': 90})
+irDistanceSensorDefinitions.append(
+    {'sensorID': 4, 'direction': 'back', 'position': 'center', 'installed': True, 'servoIndex': 4})
 # back right
-distanceData.append(
-    {'sensorID': 5, 'direction': 'back', 'position': 'right', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (2, 1), 'installed': True, 'servoIndex': 2, 'color': 'red',
-     'rotation': -90})
+irDistanceSensorDefinitions.append(
+    {'sensorID': 5, 'direction': 'back', 'position': 'right', 'installed': True, 'servoIndex': 5})
 # left side front
-distanceData.append(
-    {'sensorID': 6, 'direction': 'left', 'position': 'front', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (3, 0), 'installed': True, 'servoIndex': 3, 'color': 'red', 'rotation': 0})
-# right side front
-distanceData.append(
-    {'sensorID': 7, 'direction': 'right', 'position': 'front', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (3, 1), 'installed': True, 'servoIndex': 3, 'color': 'blue',
-     'rotation': 0})
+irDistanceSensorDefinitions.append(
+    {'sensorID': 6, 'direction': 'left', 'position': 'front', 'installed': True, 'servoIndex': None})
 # left side back
-distanceData.append(
-    {'sensorID': 8, 'direction': 'left', 'position': 'back', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (3, 0), 'installed': True, 'servoIndex': 4, 'color': 'red', 'rotation': 0})
+irDistanceSensorDefinitions.append(
+    {'sensorID': 7, 'direction': 'left', 'position': 'back', 'installed': True, 'servoIndex': None})
+# right side front
+irDistanceSensorDefinitions.append(
+    {'sensorID': 8, 'direction': 'right', 'position': 'front', 'installed': True, 'servoIndex': None})
 # right side back
-distanceData.append(
-    {'sensorID': 9, 'direction': 'right', 'position': 'back', 'newValuesShown': False,
-     'timestamp': time.time(), 'valueIndex': (3, 1), 'installed': True, 'servoIndex': 4, 'color': 'blue',
-     'rotation': 0})
+irDistanceSensorDefinitions.append(
+    {'sensorID': 9, 'direction': 'right', 'position': 'back', 'installed': True, 'servoIndex': None,})
 
 
-def updateDistances(Values):
+usDistanceSensorDefinitions = []
+# front left
+usDistanceSensorDefinitions.append(
+    {'sensorID': 0, 'name': 'left wheel', 'installed': True})
+usDistanceSensorDefinitions.append(
+    {'sensorID': 0, 'name': 'left center', 'installed': True})
+usDistanceSensorDefinitions.append(
+    {'sensorID': 0, 'name': 'right center', 'installed': True})
+usDistanceSensorDefinitions.append(
+    {'sensorID': 0, 'name': 'right wheel', 'installed': True})
+
+# the distance values
+usDistanceSensor = [0] * mg.NUM_US_DISTANCE_SENSORS
+
+
+def updateFloorOffset(msg):
     """
-    cart arduino msg A1 sends measured distance values
-    # !A1,<sensorID>,<ANZ_MESSUNGEN_PRO_SCAN>,<servoStep>,[ANZ_MESSUNGEN_PRO_SCAN<value>,]
+    cart arduino msg A1 sends floor offsets (measured distance - calibration distance
+    # !A1,<sensorID>,<NUM_SCAN_STEPS>,[NUM_SCAN_STEPS<value>,]
+    :param msg:
+    :return:
+    """
+    sensorId = msg[1]
+    numValues = msg[2]
+    offsetValues = [int(i) for i in msg[3:-1]]
+
+    formattedList = "".join([f"{x:5d}" for x in offsetValues])
+    config.log(f"floor offsets [mm], sensor: {config.getSensorName(sensorId)} {formattedList}", publish=False)
+
+    cart.floor.offset[sensorId] = offsetValues
+
+    cart.floor.timeStamp[sensorId] = time.time()
+    cart.publishFloorOffset(sensorId)
+
+
+def updateSensorTestData(msg):
+    """
+    cart arduino msg A7 sends measured distance values
+    the measured distances are only sent when a sensor test is requested
+    # !A7,<sensorId>,<NUM_SCAN_STEPS>,<distances>]
     :param Values:
     :return:
     """
-    sensorID = Values[1]
-    numValues = Values[2]
-    servoStep = Values[3]
+    sensorId:int = msg[1]
+    numValues:int = msg[2]
+    distanceValues = [int(i) for i in msg[3:-1]]
 
-    config.log(f"updateDistances, sensor: {config.getSensorName(sensorID)} {Values[4:-1]}", publish=False)
+    formattedList = "".join([f"{x:5d}" for x in distanceValues])
+    config.log(f"floor distances, sensor: {config.getSensorName(sensorId)} {formattedList}", publish=False)
 
-    for i in range(numValues):
-        try:
-            distanceList[sensorID][i] = round(float(Values[4 + i]))
-        except ValueError:
-            distanceList[sensorID][i] = 0
-        except IndexError:
-            distanceList[sensorID][i] = 0
-            config.log(f"something is wrong with !A1 message from cart: {Values}")
-
-    distanceData[sensorID]['timestamp'] = time.time()
-    distanceData[sensorID]['newValuesShown'] = False
+    config.sensorTestData.sensorId = sensorId
+    config.sensorTestData.distance = np.asarray(distanceValues)     # measured distance in mm
+    config.sensorTestData.timeStamp = time.time()
+    config.sensorTestData.sumMeasures = np.add(config.sensorTestData.sumMeasures, config.sensorTestData.distance)
+    config.sensorTestData.numMeasures += 1
+    cart.publishSensorTestData()
 
 
-def setSensorDataShown(sensorID, new):
-    distanceData[sensorID]['newValuesShown'] = new
+def updateFreeFrontRoom(messageItems):
+    """
+    the cart has 4 ultrasonic sensors in the front
+    these sensors can only detect distances to obstacles, so without obstacles we get no distance
+    :param messageItems:
+    :return:
+    """
+    for usSensorId in range(mg.NUM_US_DISTANCE_SENSORS):
+        usDistanceSensor[usSensorId] = messageItems[usSensorId]
+
+    config.distanceDataChanged = True

@@ -1,13 +1,13 @@
 
 import time
 
-import inmoovGlobal
+#import inmoovGlobal
 import config
-import depthImage
+#import depthImage
 import findObstacles
 import arduinoSend
-import camImages
-import handleRobot
+#import camImages
+#import handleRobot
 
 # threadMonitorForwardMove
 # runs as thread
