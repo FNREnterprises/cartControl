@@ -9,6 +9,8 @@
         <list>
           <option value="numpy.radians" />
           <option value="numpy.cos" />
+          <option value="cartControl.marvinglobal" />
+          <option value="cart.marvinglobal" />
         </list>
       </option>
     </inspection_tool>

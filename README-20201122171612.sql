@@ -1,0 +1,8 @@
+    `sharedData` REFERENCE,
+,
+    `cartControl` TEST,
+    `cartArduino` TEST,
+,
+    `cartControl` SENSOR,
+    `cartGui` MEASURED,
+    `cartGui` DISPLAY,

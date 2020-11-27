@@ -1,6 +1,7 @@
 
+import os
 import time
-import numpy as np
+from typing import Tuple
 
 import config
 import marvinglobal.marvinglobal as mg
@@ -70,19 +71,19 @@ def updateFloorOffset(msg):
     formattedList = "".join([f"{x:5d}" for x in offsetValues])
     config.log(f"floor offsets [mm], sensor: {config.getSensorName(sensorId)} {formattedList}", publish=False)
 
-    cart.floor.offset[sensorId] = offsetValues
+    config.floorOffsetLocal[sensorId].offset = offsetValues
 
-    cart.floor.timeStamp[sensorId] = time.time()
-    cart.publishFloorOffset(sensorId)
+    updStmt:Tuple[mg.SharedDataItem,int,...] = (mg.SharedDataItem.FLOOR_OFFSET, sensorId, config.floorOffsetLocal[sensorId].offset)
+    config.share.updateSharedData(updStmt)
+
 
 
 def updateSensorTestData(msg):
     """
-    cart arduino msg A7 sends measured distance values
+    cart arduino msg A7 contains measured distance values for each scan step
     the measured distances are only sent when a sensor test is requested
     # !A7,<sensorId>,<NUM_SCAN_STEPS>,<distances>]
-    :param Values:
-    :return:
+    forward the distances to the gui
     """
     sensorId:int = msg[1]
     numValues:int = msg[2]
@@ -91,12 +92,7 @@ def updateSensorTestData(msg):
     formattedList = "".join([f"{x:5d}" for x in distanceValues])
     config.log(f"floor distances, sensor: {config.getSensorName(sensorId)} {formattedList}", publish=False)
 
-    config.sensorTestData.sensorId = sensorId
-    config.sensorTestData.distance = np.asarray(distanceValues)     # measured distance in mm
-    config.sensorTestData.timeStamp = time.time()
-    config.sensorTestData.sumMeasures = np.add(config.sensorTestData.sumMeasures, config.sensorTestData.distance)
-    config.sensorTestData.numMeasures += 1
-    cart.publishSensorTestData()
+    config.share.cartGuiUpdateQueue.put({'msgType': mg.SharedDataItem.SENSOR_TEST_DATA, 'sensorId': sensorId, 'distances': distanceValues})
 
 
 def updateFreeFrontRoom(messageItems):
@@ -109,4 +105,3 @@ def updateFreeFrontRoom(messageItems):
     for usSensorId in range(mg.NUM_US_DISTANCE_SENSORS):
         usDistanceSensor[usSensorId] = messageItems[usSensorId]
 
-    config.distanceDataChanged = True

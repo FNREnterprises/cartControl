@@ -5,27 +5,30 @@ import sys
 import cv2
 import logging
 import marvinglobal.marvinglobal as mg
+import marvinglobal.marvinShares as marvinShares
+import marvinglobal.cartClasses
 
 processName = 'cartControl'
-share:mg.MarvinShares = None   # shared data
+share:marvinShares.MarvinShares = None   # shared data
 
-state = mg.State()
-location = mg.Location()
-movement = mg.Movement()
-sensorTestData = mg.SensorTestData()
-floorOffset = mg.FloorOffset()
-obstacleDistance = mg.ObstacleDistance()
-platformImu = mg.ImuData()
-headImu = mg.ImuData()
-battery6V = mg.Battery(5)
-battery12V = mg.Battery(10)
+stateLocal = marvinglobal.cartClasses.State()
+locationLocal = marvinglobal.cartClasses.Location()
+movementLocal = marvinglobal.cartClasses.Movement()
+sensorTestDataLocal = marvinglobal.cartClasses.SensorTestData()
+floorOffsetLocal = [marvinglobal.cartClasses.FloorOffset() for i in range(mg.NUM_IR_DISTANCE_SENSORS)]
+irSensorReferenceDistanceLocal = [marvinglobal.cartClasses.IrSensorReferenceDistance() for i in range(mg.NUM_IR_DISTANCE_SENSORS)]
+obstacleDistanceLocal = marvinglobal.cartClasses.ObstacleDistance()
+platformImuLocal = marvinglobal.cartClasses.ImuData()
+headImuLocal = marvinglobal.cartClasses.ImuData()
+battery6VLocal = marvinglobal.cartClasses.Battery(5)
+battery12VLocal = marvinglobal.cartClasses.Battery(10)
 
-simulateArduino = True
+simulateArduino = False
 
 # configuration values for cart arduino infrared distance limits
 DISTANCE_UNKNOWN = 999
-FLOOR_MAX_OBSTACLE = 15  # mm
-FLOOR_MAX_ABYSS = 20     # mm
+FLOOR_MAX_OBSTACLE = 15  # allowed shorter distance in mm from reference value
+FLOOR_MAX_ABYSS = 20     # allowed additional distance in mm from reference value
 NUM_REPEATED_MEASURES = 7
 DELAY_BETWEEN_ANALOG_READS = 20         # value 1 caused unstable analog read values from distance sensor (2.4.2019)
 MIN_SCAN_CYCLE_DURATION = 80            # when moving maintain a minimal delay between sensor reads
