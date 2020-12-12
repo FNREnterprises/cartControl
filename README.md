@@ -79,7 +79,7 @@ This in a separate project and is written in Arduino C++ code. See documentation
     actor cartGui
     cartGui -> cartControl : test sensor (sensorId)\n<font color=red><b>mg.cartCommand.TEST_SENSOR
     cartControl -> cartArduino : test sensor\n<font color=red><b>7,<sensorId>
-    loop 5 times
+    loop 5 seconds
         cartArduino -> cartControl : sensor distances\n<font color=blue><b>!A7
         cartControl -> cartGui : measured distances
         cartGui -> cartGui : display values\ncalculate and display average
@@ -91,9 +91,23 @@ This in a separate project and is written in Arduino C++ code. See documentation
 
 Cart movements can be requested through the cart GUI or by any other process using the cartCommandQueue
 
+````puml
+@startuml
+class Move{
+- move direction
+- distance
+- speed
+- protected
+}
+@enduml
+````
+
+
+The command for a move is "1"
+
 Move Directions
 * forward  
-  forward moves will use the depth cam to check for obstacles
+  forward moves will use the depth cam and ultrasonic sensors to check for obstacles
 * backward
 * left
 * right
@@ -103,3 +117,13 @@ Move Directions
 * diagonal backward right
 * rotation clockwise
 * rotation counterclockwise
+
+| Field         | Explanation                 |
+| ------------- | ----------------------------|
+| **Distance**  | distance in mm              |
+| **Speed**     | a value between 50 and 250  |
+| **Protected** |for normal moves in forward direction with protection activated it will make use of the head camera and the ultrasonic distance sensors in addition to the infrared sensors<br>for special moves (e.g. docking) protection needs to be disabled as it  would prevent the cart to get in close encounter with objects.|
+
+{{CommandsToArduio.puml}}
+
+

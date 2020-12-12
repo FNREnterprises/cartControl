@@ -69,7 +69,7 @@ CENTER_OF_CART_ROTATION_Y = -30
 _lastBatteryCheckTime = time.time()
 _batteryStatus = None
 arduino = None
-arduinoConnEstablished = 0
+arduinoConnEstablished:bool = False
 _mVolts12V = 0
 _mVolts6V = 0
 
@@ -140,7 +140,7 @@ navThread = None
 
 def log(msg, publish=True):
 
-    logtime = str(datetime.datetime.now())[11:22]
+    logtime = str(datetime.datetime.now())[11:21]
     logging.info(f"{logtime} - {msg}")
     print(f"{logtime} - {msg}")
 
@@ -156,8 +156,12 @@ def saveImg(img, frameNr):
         log(f"cartGlobal, saveImg exception {sys.exc_info()[0]}")
 
 
-def getSensorName(sensorID):
-    return ["front left", "front center", "front right", "back left", "back center", "back right", "left front", "right front", "left back", "right back"][sensorID ]
+def getIrSensorName(sensorID):
+    return ["swipeFrontLeft", "swipeFrontCenter", "swipeFrontRight", "swipeBackLeft", "swipeBackCenter", "swipeBackRight", "staticLeftFront", "staticRightFront", "staticLeftBack", "staticRightBack"][sensorID ]
+
+
+def getUsSensorName(sensorID):
+    return ["left", "middleLeft", "middleRight", "Right"][sensorID]
 
 
 def signedAngleDifference(start, end):

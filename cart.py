@@ -6,7 +6,7 @@ import numpy as np
 import simplejson as json
 
 import marvinglobal.marvinglobal as mg
-import marvinglobal.cartClasses as cartCls
+import marvinglobal.cartClasses
 import config
 import arduinoSend
 
@@ -17,28 +17,28 @@ persistedLocation = "cartLocation.json"
 # other processes in need of cart information get updated by the shareManager
 
 def publishState():
-    updStmt:Tuple[mg.SharedDataItem,cartCls.State] = (mg.SharedDataItem.CART_STATE, config.stateLocal)
+    updStmt:Tuple[mg.SharedDataItem,marvinglobal.cartClasses.State] = (mg.SharedDataItem.CART_STATE, config.stateLocal)
     config.share.updateSharedData(updStmt)
 
 def publishLocation():
-    updStmt:Tuple[mg.SharedDataItem, cartCls.Location] = (mg.SharedDataItem.CART_LOCATION, config.locationLocal)
+    updStmt:Tuple[mg.SharedDataItem, marvinglobal.cartClasses.Location] = (mg.SharedDataItem.CART_LOCATION, config.locationLocal)
     config.share.updateSharedData(updStmt)
 
 def publishMovement():
-    updStmt:Tuple[mg.SharedDataItem, cartCls.Movement] = (mg.SharedDataItem.CART_MOVEMENT, config.movementLocal)
+    updStmt:Tuple[mg.SharedDataItem, marvinglobal.cartClasses.Movement] = (mg.SharedDataItem.CART_MOVEMENT, config.movementLocal)
     config.share.updateSharedData(updStmt)
 
 def publishPlatformImu():
-    updStmt:Tuple[mg.SharedDataItem,cartCls.ImuData] = (mg.SharedDataItem.PLATFORM_IMU, config.platformImuLocal)
+    updStmt:Tuple[mg.SharedDataItem,marvinglobal.cartClasses.ImuData] = (mg.SharedDataItem.PLATFORM_IMU, config.platformImuLocal)
     config.share.updateSharedData(updStmt)
 
 def publishHeadImu():
-    updStmt:Tuple[mg.SharedDataItem,cartCls.ImuData] = (mg.SharedDataItem.HEAD_IMU, config.headImuLocal)
+    updStmt:Tuple[mg.SharedDataItem,marvinglobal.cartClasses.ImuData] = (mg.SharedDataItem.HEAD_IMU, config.headImuLocal)
     config.share.updateSharedData(updStmt)
 
 
 def publishObstacleDistances():
-    updStmt:Tuple[mg.SharedDataItem,cartCls.ObstacleDistance] = (mg.SharedDataItem.OBSTACLE_DISTANCE, config.obstacleDistanceLocal)
+    updStmt:Tuple[mg.SharedDataItem,marvinglobal.cartClasses.ObstacleDistance] = (mg.SharedDataItem.OBSTACLE_DISTANCE, config.obstacleDistanceLocal)
     config.share.updateSharedData(updStmt)
 
 
@@ -47,28 +47,26 @@ def publishObstacleDistances():
 
 def initiateMove(moveDirection, speed, distanceMm, protected=True):
 
-    # a protected move includes monitoring of obstacles during the movement
-    # protection is only available for FORWARD moves
-    #obstacleDistance = distanceMm
+    # a protected FORWARD move includes monitoring of obstacles with the headCam
     if protected and moveDirection == mg.MoveDirection.FORWARD:
         # request image processing to monitor move
         config.share.imageProcessingQueue.put(mg.START_MONITOR_FORWARD_MOVE)
-        protected = True
-    else:
-        protected = False
 
     config.movementLocal.moveDirection = moveDirection
     config.movementLocal.speed = speed
-    config.movementLocal.distanceRequested = min(distanceMm, 2500)     # limit distance for single command
+    config.movementLocal.distanceRequested = min(distanceMm, 2500)     # limit distance for single move command
+    config.movementLocal.rotationRequested = 0
     config.movementLocal.protected = protected
-    config.movementLocal.start.x = config.locationLocal.x
-    config.movementLocal.start.y = config.locationLocal.y
-    config.movementLocal.start.yaw = config.locationLocal.yaw
+    config.movementLocal.startX = config.locationLocal.x
+    config.movementLocal.startY = config.locationLocal.y
+    config.movementLocal.startYaw = config.locationLocal.yaw
     config.movementLocal.moveAngle = config.movementLocal.evalMoveAngle(moveDirection)
-    config.movementLocal.target.x = config.movementLocal.start.x + int(distanceMm * np.cos(np.radians(config.movementLocal.moveAngle)))
-    config.movementLocal.target.y = config.movementLocal.start.y + int(distanceMm * np.sin(np.radians(config.movementLocal.moveAngle)))
+    config.movementLocal.targetX = config.movementLocal.startX + int(distanceMm * np.cos(np.radians(config.movementLocal.moveAngle)))
+    config.movementLocal.targetY = config.movementLocal.startY + int(distanceMm * np.sin(np.radians(config.movementLocal.moveAngle)))
+    config.movementLocal.targetYaw = config.locationLocal.yaw
     config.movementLocal.moveStartTime = time.time()
-    config.movementLocal.maxDuration = min(((distanceMm / speed) * 1500) + 1500, 15000)
+    config.movementLocal.maxDuration = int(min(((distanceMm / speed) * 1500) + 1500, 15000))
+    config.movementLocal.reasonStopped = "-"
     publishMovement()
 
     config.stateLocal.cartMoving = True
@@ -99,7 +97,7 @@ def terminateMove(distanceMoved, yaw, reason):
         publishLocation()
 
     # config.log("<-A " + recv, publish=False)  # stop and reason
-    config.log(f"!A6 cart move stopped, {reason}")
+    config.log(f"!S4 cart move stopped, {reason}")
 
     # if sensorTest is active stop it
     #if distanceSensors.sensorInTest is not None:
@@ -109,10 +107,20 @@ def terminateMove(distanceMoved, yaw, reason):
 def initiateRotation(relativeAngle, speed=200):
 
     config.movementLocal.moveDirection = mg.MoveDirection.ROTATE_LEFT if relativeAngle > 0 else mg.MoveDirection.ROTATE_RIGHT
-    config.movementLocal.rotationRequested = relativeAngle
     config.movementLocal.speed = speed
+    config.movementLocal.distanceRequested = 0
+    config.movementLocal.rotationRequested = relativeAngle
+    config.movementLocal.protected = False
+
+    config.movementLocal.startX = config.locationLocal.x
+    config.movementLocal.startY = config.locationLocal.y
     config.movementLocal.startYaw = config.locationLocal.yaw
-    config.moveStartTime = time.time()
+    config.movementLocal.moveAngle = 0
+    config.movementLocal.targetX = config.locationLocal.x
+    config.movementLocal.targetY = config.locationLocal.y
+    config.movementLocal.targetYaw = config.locationLocal.yaw + relativeAngle
+    config.movementLocal.moveStartTime = time.time()
+    config.movementLocal.maxDuration = 2500 + abs(relativeAngle) * 50;
     publishMovement()
 
     config.stateLocal.cartMoving = False
@@ -132,16 +140,35 @@ def terminateRotation(reason):
     config.movementLocal.reasonStopped = reason
     publishMovement()
 
+    config.log(f"!S3 cart rotation stopped, {reason}")
+
 
 def updateCartLocation(yaw, distance):
-    # only update when values have changed
+    # only update when values have a significant change
     if abs(yaw - config.locationLocal.yaw) < 1 and abs(distance - config.movementLocal.distanceMoved) < 5:
         return
-    config.movementLocal.distanceMoved = distance
-    config.locationLocal.x = config.movementLocal.start.x + int(config.movementLocal.distanceMoved * np.cos(np.radians(config.movementLocal.start.yaw)))
-    config.locationLocal.y = config.movementLocal.start.y + int(config.movementLocal.distanceRequested * np.sin(np.radians(config.movementLocal.start.yaw)))
+    #config.log(f"!P1, update cart location, yaw: {yaw}, distance: {distance}, move angle: {config.movementLocal.moveAngle}")
+    config.locationLocal.x = config.movementLocal.startX + int(config.movementLocal.distanceMoved * np.cos(np.radians(config.movementLocal.moveAngle)))
+    config.locationLocal.y = config.movementLocal.startY + int(config.movementLocal.distanceMoved * np.sin(np.radians(config.movementLocal.moveAngle)))
     config.share.updateSharedData((mg.SharedDataItem.CART_LOCATION, config.locationLocal))
     saveCartLocation()
+
+    config.movementLocal.rotated = config.movementLocal.startYaw - yaw
+    config.movementLocal.distanceMoved = distance
+    config.share.updateSharedData((mg.SharedDataItem.CART_MOVEMENT, config.movementLocal))
+
+
+def updateCartRotation(yaw):
+    # only update when values have a significant change
+    if abs(yaw - config.locationLocal.yaw) < 1:
+        return
+    config.log(f"!P2, update cart rotation, yaw: {yaw}")
+    config.locationLocal.yaw = yaw
+    config.share.updateSharedData((mg.SharedDataItem.CART_LOCATION, config.locationLocal))
+    saveCartLocation()
+
+    config.movementLocal.rotated = config.movementLocal.startYaw - yaw
+    config.share.updateSharedData((mg.SharedDataItem.CART_MOVEMENT, config.movementLocal))
 
 
 def saveCartLocation():
@@ -169,7 +196,7 @@ def loadCartLocation():
     """
     # Getting back the last saved cart data
     config.log(f"load cart location")
-    config.locationLocal = cartCls.Location()
+    config.locationLocal = marvinglobal.cartClasses.Location()
     filename = persistedLocation
     if os.path.exists(filename):
         with open(filename, "r") as read_file:

@@ -56,7 +56,8 @@ def cartInit(verbose:bool):
 
     if not config.arduinoConnEstablished:
         config.log(f"cart - could not get message response from Arduino, going down")
-        sys.exit()
+        endCartControl()
+
 
     arduinoSend.setVerbose(verbose)
 
@@ -71,55 +72,16 @@ def cartInit(verbose:bool):
 
     findObstacles.initObstacleDetection()
 
-'''
-def updateCartLocation(magnitude, final=False):
-    """
-    based on distance update from the cart's odometer update the current cart position
-    cart 0 degrees is to the right
-    include xy drift by rotation
-    :param orientation:
-    :param magnitude: for rotation the angle in degrees, for moves the distance in mm
-    :param moveDirection:
-    :return:
-    """
-    if not final and magnitude == 0:
-        return
 
-    if config.movement.moveDirection not in [mg.MoveDirection.ROTATE_LEFT, mg.MoveDirection.ROTATE_RIGHT]:
-
-        # for x/y change calculation we need degrees that start to the right (normal circle)
-        # take cart orientation and cart move direction into account
-        # cart orientation 0 is to the right
-        trigDegrees = config.evalCartDegrees(config.location.yaw, config.movement.moveDirection)
-        if trigDegrees is not None:
-            config.location.x = config.movement.startX + int(magnitude * np.cos(np.radians(trigDegrees)))
-            config.location.y = config.movement.startY + int(magnitude * np.sin(np.radians(trigDegrees)))
-        else:
-            config.log(f"unexpected missing trigDegrees in updateCartLocation, distance: {magnitude}, moveDirection: {config.movement.moveDirection}, final: {final}")
-
-    #rpcSend.publishCartProgress(moveDirection, magnitude, final)
-
-    if final or time.time() - config.location.lastLocationSaveTime > 0.2:
-        config.share.updateSharedData(mg.SharedDataItem.LOCATION, config.location)
-        saveCartLocation()
-'''
-
-
-def calculateCartTarget(orientation, distance, moveDirection: 'config.Direction'):
-
-    # for x/y change calculation we need degrees that start to the right (normal circle)
-    # take cart orientation and cart move direction into account
-    # cart orientation 0 is straight up
-    trigDegrees = config.evalCartDegrees(orientation, moveDirection)
-    if trigDegrees is not None:
-        cart.location.targetX = cart.movement.moveStartX + int(distance * np.cos(np.radians(trigDegrees)))
-        cart.location.targetY = cart.movement.moveStartY + int(distance * np.sin(np.radians(trigDegrees)))
-        config.log(f"move - from: {cart.location.x:.0f} / {cart.location.y:.0f}, orientation: {orientation}, moveDir: {moveDirection}, deg: {trigDegrees:.0f}, dist: {distance}, to: {cart.location.carttargetX:.0f} / {cart.location.carttargetY:.0f}")
-
-    else:
-        config.log(
-            f"unexpected missing trigDegrees in calculateCarttarget, distance: {distance}, moveDirection: {moveDirection}")
-
+def endCartControl():
+    if config.arduinoConnEstablished:
+        config.arduino.close()
+    if config.share is not None:
+        config.share.removeProcess(config.processName)
+        config.stateLocal = mg.CartStatus.DOWN
+        updStmt: Tuple[int, cartCls.State] = (mg.SharedDataItem.CART_STATE, config.stateLocal)
+        config.share.updateSharedData(updStmt)
+    os._exit(1)
 
 
 def getRemainingRotation():
@@ -165,12 +127,12 @@ if __name__ == '__main__':
 
     config.log("cartControl started")
 
-    cartInit(verbose=False)
+    cartInit(verbose=True)
 
     time.sleep(2)
     if not 'imageProcessing' in config.share.processDict.keys():
-        config.log(f"cart needs a running imageProcessing, going down")
-        #os._exit(2)
+        config.log(f"cart needs a running imageProcessing, currently ignored")
+        #endCartControl()
 
 
     # start forward move monitoring thread
@@ -189,9 +151,7 @@ if __name__ == '__main__':
 
     if not config.cartReady:
         config.log(f"cart did not start up in time, going down {config.cartReady=}, {time.time()<readyTimeoutWait=}")
-        #config.navThread.join()
-        #config.msgThread.join()
-        os._exit(1)
+        endCartControl()
 
     config.log(f"wait for cart requests")
 
@@ -207,14 +167,16 @@ if __name__ == '__main__':
         request = None
         try:
             request = config.share.cartRequestQueue.get(timeout=1)
-        except TimeoutError:
+        except (TimeoutError, Empty):
             config.share.updateProcessDict(config.processName)
-            continue
-        except Empty:
+            arduinoSend.sendHeartbeat()
+            #config.log(f"send heartbeat to marvinData and Arduino")
             continue
         except Exception as e:
             config.log(f"connection with sharedData lost {e=}, going down")
-            os._exit(2)
+            endCartControl()
+
+        config.log(f"new request: {request}")
 
         cmd = request['cmd']
         if cmd == mg.CartCommand.MOVE:

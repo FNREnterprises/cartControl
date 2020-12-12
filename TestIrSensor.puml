@@ -1,0 +1,10 @@
+@startuml
+    actor cartGui
+    cartGui -> cartControl : test sensor (sensorId)\n<font color=red><b>mg.cartCommand.TEST_SENSOR
+    cartControl -> cartArduino : test sensor\n<font color=red><b>7,<sensorId>
+    loop 5 seconds
+        cartArduino -> cartControl : sensor distances\n<font color=blue><b>!A7
+        cartControl -> cartGui : measured distances
+        cartGui -> cartGui : display values\ncalculate and display average
+    end
+@enduml

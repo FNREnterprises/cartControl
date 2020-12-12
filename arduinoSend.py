@@ -21,7 +21,6 @@ def sendConfigValues():
     config.arduino.write(bytes(msg + ',\n', 'ascii'))
     config.log(f"configuration part a sent, {msg}")
     time.sleep(0.5)
-
     msg = f"b,{config.SPEED_FACTOR:07.4f},{config.SPEED_OFFSET:07.4f},{config.SPEED_FACTOR_SIDEWAY:05.2f},{config.SPEED_FACTOR_DIAGONAL:05.2f}"
     config.arduino.write(bytes(msg + ',\n', 'ascii'))
     config.log(f"configuration part b sent, {msg}")
@@ -42,11 +41,11 @@ def sendConfigValues():
 def sendMoveCommand():
 
     flagProtected = 1 if config.movementLocal.protected else 0
-    msg = f"1,{config.movementLocal.moveDirection}," \
+    msg = f"1,{config.movementLocal.moveDirection.value}," \
           f"{config.movementLocal.speed:03.0f}," \
           f"{config.movementLocal.distanceRequested:04.0f}," \
           f"{config.movementLocal.maxDuration:05.0f}," \
-          f"{config.movementLocal.protected}"
+          f"{flagProtected}"
 
     if config.simulateArduino:
         config.log(f"simulated move: {msg}")
@@ -57,17 +56,14 @@ def sendMoveCommand():
 def sendRotateCommand():
 
     if config.movementLocal.moveDirection == mg.MoveDirection.ROTATE_LEFT:  # rotate counterclock
-        msg = f"2,{abs(config.movementLocal.rotationRequested):03.0f},{config.movementLocal.speed:03.0f},1"
+        msg = f"2,{abs(config.movementLocal.rotationRequested):03.0f},{config.movementLocal.speed:03.0f},{config.movementLocal.maxDuration:05.0f}"
         config.log(f"Send rotate counterclock {msg}")
 
     else:
-        msg = f"3,{abs(config.movementLocal.rotationRequested):03.0f},{config.movementLocal.speed:03.0f},1"
+        msg = f"3,{abs(config.movementLocal.rotationRequested):03.0f},{config.movementLocal.speed:03.0f},{config.movementLocal.maxDuration:05.0f}"
         config.log(f"Send rotate clockwise {msg}")
 
-    if config.simulateArduino:
-        config.log("simulated rotation: {msg}")
-    else:
-        config.arduino.write(bytes(msg + ',\n', 'ascii')) if sendCommandsToArduino else config.log(f"->A, {msg}")
+    config.arduino.write(bytes(msg + ',\n', 'ascii'))
 
 
 

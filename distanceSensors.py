@@ -57,24 +57,36 @@ usDistanceSensorDefinitions.append(
 usDistanceSensor = [0] * mg.NUM_US_DISTANCE_SENSORS
 
 
-def updateFloorOffset(msg):
+def updateFloorOffset(recv):
     """
-    cart arduino msg A1 sends floor offsets (measured distance - calibration distance
-    # !A1,<sensorID>,<NUM_SCAN_STEPS>,[NUM_SCAN_STEPS<value>,]
-    :param msg:
-    :return:
+    cart arduino msg F1 sends floor offsets of involved ir sensors of movement direction
+    # !F1,[<sensorID>,<obstacleheight>,<abyssDepth>]*involvedSensors(max 6)
     """
-    sensorId = msg[1]
-    numValues = msg[2]
-    offsetValues = [int(i) for i in msg[3:-1]]
+    msg = [int(e) if e.isdigit() else e for e in recv.split(',')]
 
-    formattedList = "".join([f"{x:5d}" for x in offsetValues])
-    config.log(f"floor offsets [mm], sensor: {config.getSensorName(sensorId)} {formattedList}", publish=False)
+    numSensors = int((len(msg)-1) / 4)
 
-    config.floorOffsetLocal[sensorId].offset = offsetValues
+    config.log("!F1:")
+    for sensor in range(numSensors):
+        sensorId = msg[sensor * 4 + 1]
+        logMsg = config.getIrSensorName(sensorId)
 
-    updStmt:Tuple[mg.SharedDataItem,int,...] = (mg.SharedDataItem.FLOOR_OFFSET, sensorId, config.floorOffsetLocal[sensorId].offset)
-    config.share.updateSharedData(updStmt)
+        step = msg[sensor * 4 + 2]
+        logMsg += f", {step=}"
+
+        obstacleHeight = msg[sensor * 4 + 3]
+        config.floorOffsetLocal[sensorId].obstacleHeight[step] = obstacleHeight
+        logMsg += f", {obstacleHeight=}"
+
+        abyssDepth = msg[sensor * 4 + 4]
+        config.floorOffsetLocal[sensorId].abyssDepth[step] = abyssDepth
+        logMsg += f", {abyssDepth=}"
+        config.log(logMsg)
+        config.floorOffsetLocal[sensorId].lastUpdate = time.time()
+
+        updStmt:Tuple[mg.SharedDataItem,int,...] = (mg.SharedDataItem.FLOOR_OFFSET, sensorId, step, obstacleHeight, abyssDepth)
+        config.share.updateSharedData(updStmt)
+
 
 
 
@@ -82,7 +94,7 @@ def updateSensorTestData(msg):
     """
     cart arduino msg A7 contains measured distance values for each scan step
     the measured distances are only sent when a sensor test is requested
-    # !A7,<sensorId>,<NUM_SCAN_STEPS>,<distances>]
+    # !F3,<sensorId>,<NUM_SCAN_STEPS>,<distances>]
     forward the distances to the gui
     """
     sensorId:int = msg[1]
@@ -90,7 +102,7 @@ def updateSensorTestData(msg):
     distanceValues = [int(i) for i in msg[3:-1]]
 
     formattedList = "".join([f"{x:5d}" for x in distanceValues])
-    config.log(f"floor distances, sensor: {config.getSensorName(sensorId)} {formattedList}", publish=False)
+    config.log(f"floor distances, sensor: {config.getIrSensorName(sensorId)} {formattedList}", publish=False)
 
     config.share.cartGuiUpdateQueue.put({'msgType': mg.SharedDataItem.SENSOR_TEST_DATA, 'sensorId': sensorId, 'distances': distanceValues})
 

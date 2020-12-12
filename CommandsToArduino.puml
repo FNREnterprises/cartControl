@@ -1,0 +1,10 @@
+@startuml
+
+class cartRequests {
++ a configuration part 1
++ b configuration part 2
++ d configuration part 3
++ e configuration part 4
+}
+
+@enduml

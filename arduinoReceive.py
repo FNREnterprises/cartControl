@@ -34,7 +34,7 @@ def initSerial(comPort):
 
         except Exception as e:
             config.log(f"could not reconnect COM5, going down")
-            os._exit(0)
+            cartControl.endCartControl()
 
 
 #####################################
@@ -81,96 +81,21 @@ def readMessages():
                 cart.publishState()
 
 
-            elif msgID == "!A1":  # floor offsets from infrared sensors
-                # !A1,<sensorID>,<ANZ_MESSUNGEN_PRO_SCAN>,[ANZ_MESSUNGEN_PRO_SCAN<value>,]
-                #þconfig.log(f"{recv}", publish=False)
-                messageItems = [int(e) if e.isdigit() else e for e in recv.split(',')]
-                distanceSensors.updateFloorOffset(messageItems)
+            elif msgID == "!F0":
+                # send sensor results to cartGui
+                config.log(f"!F0: signal cartgui to update sensor data {recv}")
+                config.share.cartGuiUpdateQueue.put({'msgType': mg.SharedDataItem.FLOOR_OFFSET})
 
 
-            elif msgID == "!A2":  # "obstacle:":
-                # !A2,<t<pe>,<distance>,<limit>,<sensorName>
-                sensorID = 0
-                try:
-                    items = recv.split(",")
-                    type = int(items[1])
-                    distance= int(items[2])
-                    limit= int(items[3])
-                    sensorId = items[4]
-
-                except Exception as e:
-                    config.log(f"exception with message: '{recv}', error in message structure {e}")
-                    continue
-
-                #config.log(f"!A2 obstacle detected, height: {distance} > limit: {limit}, sensor: {sensorId}")
-
-                config.movementLocal.distanceSensorObstacle = str(distance)
-                config.movementLocal.sensorIdObstacle = sensorId
-                cart.publishMovement()
-
-
-            elif msgID == "!A3":  # "abyss:":
-                # !A2,<farthest distance>,<farthest distance>,<first sensorId with exceeding range>
-                try:
-                    items = recv.split(",")
-                    distance = int(items[1])
-                    limit = int(items[2])
-                    sensorId = items[3]
-
-                except Exception as e:
-                    config.log(f"exception with message: '{recv}', error in message structure {e}")
-                    continue
-
-                config.log(f"!A3 abyss detected, measured dist: {distance} > limit: {limit}, sensor: {sensorId}")
-                cart.movement.distanceSensorAbyss = str(distance)
-                cart.movement.sensorIdAbyss = sensorId
-                cart.publishMovement()
-
-
-            elif msgID == "!A4":  # free path after move blocked
-                config.log(f"!A4 free path after blocked move")
-                cart.movement.distanceSensorObstacle = "-"
-                cart.movement.distanceSensorAbyss = "-"
-                cart.publishMovement()
-
-
-            elif msgID == "!A5":  # "rotation stopped":
-                # !A5,<currentYaw>,<reason>
-                items = recv.split(",")
-                yaw = round(float(items[1]))
-                stopReason = items[2]
-                cart.terminateRotation(stopReason)
-                #config.log("<-A " + recv, publish=False)  # stop and reason
-                config.log(f"!A5 cart rotation stopped, {stopReason}")
-
-
-            elif msgID == "!A6":  # movement stopped
-                # !A6,<orientation>,<distance moved>,<reason>
-                items = recv.split(",")
-                yaw = round(float(items[1]))
-                distanceMoved = int(items[2])
-                stopReason = items[3]
-
-                cart.terminateMove(distanceMoved, yaw, stopReason)
-
-
-            elif msgID == "!A7":  # measured distances of infrared sensor
-                # !A7,<sensorID>,<ANZ_MESSUNGEN_PRO_SCAN>,[ANZ_MESSUNGEN_PRO_SCAN<value>,]
+            elif msgID == "!F1":  # floor offsets from infrared sensors
+                # !F1,<sensorID>,<ANZ_MESSUNGEN_PRO_SCAN>,[ANZ_MESSUNGEN_PRO_SCAN<value>,]
                 config.log(f"{recv}", publish=False)
-                messageItems = [int(e) if e.isdigit() else e for e in recv.split(',')]
-
-                sensorId = messageItems[1]
-                distanceValues = [int(i) for i in messageItems[3:-1]]
-
-                # send result to cartGui
-                config.log(f"send measured distances to cartGui")
-                config.share.cartGuiUpdateQueue.put(
-                {'msgType': mg.CartGuiUpdateRequest.SENSOR_TEST_DATA, 'sensorId': sensorId, 'distances': distanceValues})
+                distanceSensors.updateFloorOffset(recv)
 
 
-            elif msgID == "!Ac":  # reference distances of infrared sensor stored in arduino eeprom
+            elif msgID == "!F2":  # reference distances of infrared sensor stored in arduino eeprom
                 # !Ac,<sensorID>, value, * NUM_SCAN_STEPS
-                config.log(f"{recv}", publish=False)
+                config.log(f"irSensor reference distance: {recv}", publish=False)
                 messageItems = [int(e) if e.isdigit() else e for e in recv.split(',')]
 
                 sensorId = int(messageItems[1])
@@ -180,37 +105,159 @@ def readMessages():
                 config.share.updateSharedData(updStmt)
 
 
-            elif msgID == "!A8":  # 12 V supply, measured value
+            elif msgID == "!F3":  # measured distances of infrared sensor
+                # !F3,<sensorID>,<ANZ_MESSUNGEN_PRO_SCAN>,[ANZ_MESSUNGEN_PRO_SCAN<value>,]
+                config.log(f"irSensor distance: {recv}", publish=False)
+                messageItems = [int(e) if e.isdigit() else e for e in recv.split(',')]
+
+                sensorId = messageItems[1]
+                distanceValues = [int(i) for i in messageItems[3:-1]]
+
+                config.share.cartGuiUpdateQueue.put(
+                {'msgType': mg.CartGuiUpdateRequest.SENSOR_TEST_DATA, 'sensorId': sensorId, 'distances': distanceValues})
+
+
+            elif msgID == "!F4":  # distances from ultrasonic sensors
+                # The sensors see only obstacles, 0 means no echo received or obstacles too far away
+                config.log(f"ultrasonic sensor results: {recv}")
+                messageItems = [int(e) if e.isdigit() else e for e in recv.split(',')]
+                distanceSensors.updateFreeFrontRoom(messageItems)
+
+
+            elif msgID == "!S0":  # free path after move blocked
+                config.log(f"!S0 free path after blocked move")
+                config.movementLocal.distanceSensorObstacle = 0
+                config.movementLocal.distanceSensorAbyss = 0
+                config.movementLocal.blocked = False
+                config.movementLocal.blockedStartTime = 0
+                cart.publishMovement()
+
+
+            elif msgID == "!S1":  # "obstacle on floor:":
+                # !S1,<height>,<limit>,<sensorId>
+                sensorID = 0
+                try:
+                    items = recv.split(",")
+                    height = int(items[1])
+                    limit= int(items[2])
+                    sensorId = int(items[3])
+
+                except Exception as e:
+                    config.log(f"exception with message: '{recv}', error in message structure {e}")
+                    continue
+
+                config.log(f"!S1 obstacle detected by infrared sensor, height: {height} > limit: {limit}, sensor: {config.getIrSensorName(sensorId)}")
+                config.movementLocal.obstacleFromInfraredDistanceSensor = height
+                config.movementLocal.sensorIdObstacle = sensorId
+
+                config.movementLocal.blocked = True
+                config.movementLocal.blockedStartTime = time.time()
+                config.movementLocal.reasonStopped = "obstacle detected by ir sensor"
+
+                cart.publishMovement()
+
+
+            elif msgID == "!S2":  # "abyss:":
+                # !A2,<farthest distance>,<farthest distance>,<first sensorId with exceeding range>
+                try:
+                    items = recv.split(",")
+                    depth = int(items[1])
+                    limit = int(items[2])
+                    sensorId = int(items[3])
+
+                except Exception as e:
+                    config.log(f"exception with message: '{recv}', error in message structure {e}")
+                    continue
+
+                config.log(f"!S3 abyss detected, measured depth: {depth} > limit: {limit}, sensor: {config.getIrSensorName(sensorId)}")
+                config.movementLocal.abyssFromInfraredDistanceSensor = depth
+                config.movementLocal.sensorIdAbyss = sensorId
+
+                config.movementLocal.blocked = True
+                config.movementLocal.blockedStartTime = time.time()
+                config.movementLocal.reasonStopped = "abyss detected by ir sensor"
+
+                cart.publishMovement()
+
+
+            elif msgID == "!S3":  # obstacle in front (ultrasonic sensors)
+                # !S3,<distance>,<limit>,<sensorId>
+                sensorID = 0
+                try:
+                    items = recv.split(",")
+                    distance = int(items[1])
+                    limit = int(items[2])
+                    sensorId = int(items[3])
+
+                except Exception as e:
+                    config.log(f"exception with message: '{recv}', error in message structure {e}")
+                    continue
+
+                config.log(
+                    f"!S3 obstacle detected by ultrasonic sensor, distance: {distance} > limit: {limit}, sensor: {config.getUsSensorName(sensorId)}")
+                config.movementLocal.obstacleFromInfraredDistanceSensor = distance
+                config.movementLocal.sensorIdObstacle = sensorId
+
+                config.movementLocal.blocked = True
+                config.movementLocal.blockedStartTime = time.time()
+                config.movementLocal.reasonStopped = "obstacle detected by us sensor"
+
+                cart.publishMovement()
+
+
+            elif msgID == "!S4":  # "rotation stopped":
+                # !A5,<currentYaw>,<reason>
+                items = recv.split(",")
+                yaw = round(float(items[1]))
+                stopReason = items[2]
+                cart.terminateRotation(stopReason)
+                #config.log("<-A " + recv, publish=False)  # stop and reason
+                config.log(f"!S3 cart rotation stopped, {stopReason}")
+
+
+            elif msgID == "!S5":  # movement stopped
+                # !A6,<orientation>,<distance moved>,<reason>
+                items = recv.split(",")
+                yaw = round(float(items[1]))
+                distanceMoved = int(items[2])
+                stopReason = items[3]
+                cart.terminateMove(distanceMoved, yaw, stopReason)
+
+
+            elif msgID == "!B0":  # 12 V supply, measured value
                 config.log(f"{recv} received")
                 newVoltage12V = 0
                 try:
                     newVoltage12V = round(float(recv.split(",")[1]))
                 except Exception as e:
-                    config.log("!A8 not able to retrieve voltage value {recv}, {e}")
+                    config.log("!B0 not able to retrieve voltage value {recv}, {e}")
 
                 # test for significant change in Voltage
                 if abs(config.stateLocal.Voltage12V - newVoltage12V) > 500:
                     config.stateLocal.Voltage12V = newVoltage12V
-                    config.log(f"new 12V voltage read [mV]: {newVoltage12V}")
+                    config.log(f"!B0, new 12V voltage read [mV]: {newVoltage12V}")
                     updStmt:Tuple[int,cartCls.State] = (mg.SharedDataItem.CART_STATE, config.stateLocal)
                     config.share.updateSharedData(updStmt)
 
 
-            elif msgID == "!Aa":  # cart position update:
+            elif msgID == "!P1": #"!P1":  # cart position update:
                 # !Aa, <currentYaw>, <distance moved in mm>
                 items = recv.split(",")
-                cart.updateCartLocation(yaw=round(float(items[1])), distance=round(float(items[2])))
+                yaw = round(float(items[1]))
+                distance = round(float(items[2]))
+                config.log(f"!P1 cart location update, yaw: {yaw}, distance: {distance}")
+                cart.updateCartLocation(yaw, distance)
 
 
-            elif msgID == "!Ab":  # cart rotation update:
+            elif msgID == "!P2":  #"!Ab":  # cart rotation update:
                 # !Aa, <currentYaw>
                 items = recv.split(",")
-                config.locationLocal.yaw = round(float(items[1]))
-                config.movementLocal.updateCartRotation()
-                cart.updateCartLocation(yaw=round(float(items[1])), distance=None)
+                yaw = round(float(items[1]))
+                config.log(f"!P2 cart rotation update, yaw: {yaw}")
+                cart.updateCartLocation(yaw, distance=0)
 
 
-            elif msgID == "!Ad":  # cart docked
+            elif msgID == "!D1":  #"!Ad":  # cart docked
                 # Arduino triggers the relais for loading batteries through the docking contacts
                 # gui update by heartbeat logic
                 config.log("cart docked")
@@ -218,21 +265,14 @@ def readMessages():
                 cart.publishState()
 
 
-            elif msgID == "!Ae":  # cart undocked
+            elif msgID == "!D2":  #"!Ae":  # cart undocked
                 # Arduino releases the relais for loading batteries through the docking contacts
                 config.log("cart undocked")
                 config.stateLocal.cartDocked = False
                 cart.publishState()
 
 
-            elif msgID == "!Af":  # distances from ultrasonic sensors
-                # The sensors see only obstacles, 0 means no echo received or obstacles too far away
-                config.log("ultrasonic sensor results")
-                messageItems = [int(e) if e.isdigit() else e for e in recv.split(',')]
-                distanceSensors.updateFreeFrontRoom(messageItems)
-
-
-            elif msgID == "!Ah":  # bno055 platform sensor update:
+            elif msgID == "!I1":  # bno055 platform sensor update:
                 # !Ab,<yaw>,<roll>, <pitch>
                 items = recv.split(",")
                 config.platformImuLocal.yaw = 360 - round(float(items[1]) / 1000.0)
@@ -241,11 +281,11 @@ def readMessages():
                 config.platformImuLocal.updateTime = time.time()
                 cart.publishPlatformImu()
 
-                config.log(f"!Ah, platformImu yaw: {config.platformImuLocal.yaw}, roll: {config.platformImuLocal.roll}, pitch: {config.platformImuLocal.pitch}", publish=False)
+                config.log(f"!I1, platformImu yaw: {config.platformImuLocal.yaw}, roll: {config.platformImuLocal.roll}, pitch: {config.platformImuLocal.pitch}", publish=False)
                 config.locationLocal.yaw = (config.platformImuLocal.yaw + config.platformImuLocal.yawCorrection) % 360
                 cart.publishLocation()
 
-            elif msgID == "!Ai":  # bno055 head sensor update:
+            elif msgID == "!I2":  # bno055 head sensor update:
                 # !Ab,<milliYaw>,<milliRoll>, <milliPitch>
                 items = recv.split(",")
                 config.headImuLocal.yaw = round(float(items[1]) / 1000.0)
@@ -253,7 +293,7 @@ def readMessages():
                 config.headImuLocal.pitch = float(items[3]) / 1000.0
                 config.headImuLocal.updateTime = time.time()
                 cart.publishHeadImu()
-                config.log(f"!Ai, headImu, yaw: {config.headImuLocal.yaw}, roll: {config.headImuLocal.roll}, pitch: {config.headImuLocal.pitch}", publish=False)
+                config.log(f"!I2, headImu, yaw: {config.headImuLocal.yaw}, roll: {config.headImuLocal.roll}, pitch: {config.headImuLocal.pitch}", publish=False)
 
 
             else:
