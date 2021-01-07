@@ -2,9 +2,6 @@
 import time
 
 import config
-import cartControl
-import cart
-import distanceSensors
 import marvinglobal.marvinglobal as mg
 
 sendCommandsToArduino = True   # allow or prevent messages to arduino
@@ -29,10 +26,10 @@ def sendConfigValues():
     # motor speed unifyers, FRONT_RIGHT, FRONT_LEFT, BACK_RIGHT, BACK_LEFT
     msg = f"d,104,102,097,088"
     config.arduino.write(bytes(msg + ',\n', 'ascii'))
-    config.log(f"configuration part d sent, {msg}")
+    config.log(f"configuration part c sent, {msg}")
     time.sleep(0.5)
 
-    msg = f"e,"
+    msg = f"d,"
     config.arduino.write(bytes(msg + ',\n', 'ascii'))
     config.log(f"arduino configuration complete sent: {msg}")
     time.sleep(0.5)
@@ -47,10 +44,8 @@ def sendMoveCommand():
           f"{config.movementLocal.maxDuration:05.0f}," \
           f"{flagProtected}"
 
-    if config.simulateArduino:
-        config.log(f"simulated move: {msg}")
-    else:
-        config.arduino.write(bytes(msg + ",\n", 'ascii'))
+    config.log(f"sendMoveCommand {msg=}")
+    config.arduino.write(bytes(msg + ",\n", 'ascii'))
 
 
 def sendRotateCommand():
@@ -63,6 +58,7 @@ def sendRotateCommand():
         msg = f"3,{abs(config.movementLocal.rotationRequested):03.0f},{config.movementLocal.speed:03.0f},{config.movementLocal.maxDuration:05.0f}"
         config.log(f"Send rotate clockwise {msg}")
 
+    config.log(f"sendMoveCommand {msg=}")
     config.arduino.write(bytes(msg + ',\n', 'ascii'))
 
 
@@ -71,10 +67,7 @@ def sendStopCommand(reason):
     # command 4
     msg = b'4' + b',\n'
     config.log(f"Send stop, reason: {reason}")
-    if config.simulateArduino:
-        config.log(f"simulated cart stop: {msg=}")
-    else:
-        config.arduino.write(msg)
+    config.arduino.write(msg)
 
 
 def sendSpeedCommand(speed):
@@ -85,12 +78,11 @@ def sendSpeedCommand(speed):
     #cartControl.setRequestedCartSpeed(speed)
 
 
-def testSensorCommand(sensorID):
+def testSensorCommand(sensorId):
 
-    msg = b'7,' + bytes(str(sensorID), 'ascii') + b',\n'
+    msg = b'7,' + bytes(str(sensorId), 'ascii') + b',\n'
     config.log("test sensor " + str(msg))
     config.arduino.write(msg)
-
 
 
 def sendHeartbeat():
@@ -103,7 +95,7 @@ def sendHeartbeat():
 
 def requestCartYaw():
     msg = b'5' + b',\n'
-    # cartGlobal.log("get Orientation " + msg)
+    config.log(f"requestCartYaw, {msg=}")
     config.arduino.write(msg)
 
 
@@ -113,6 +105,7 @@ def setVerbose(newState: bool):
             msg = b'v,1' + b',\n'
         else:
             msg = b'v,0' + b',\n'
+        config.log(f"setVerbose, {msg=}")
         config.arduino.write(msg)
     except:
         pass
@@ -121,7 +114,9 @@ def setVerbose(newState: bool):
 def setIrSensorReferenceDistances(sensorId, distances):
     msg = f"f,{sensorId:02.0f},"
     msg += ','.join([str(int(i)) for i in distances])
-    config.arduino.write(bytes(msg + ',\n', 'ascii'))
 
     config.log(f"ir sensor reference distances sent {msg}")
+    config.arduino.write(bytes(msg + ',\n', 'ascii'))
+
+
 

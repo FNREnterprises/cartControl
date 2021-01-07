@@ -4,31 +4,31 @@ import datetime
 import sys
 import cv2
 import logging
-import marvinglobal.marvinglobal as mg
-import marvinglobal.marvinShares as marvinShares
-import marvinglobal.cartClasses
+from marvinglobal import marvinglobal as mg
+from marvinglobal import marvinShares
+from marvinglobal import cartClasses
 
 processName = 'cartControl'
 share:marvinShares.MarvinShares = None   # shared data
 
-stateLocal = marvinglobal.cartClasses.State()
-locationLocal = marvinglobal.cartClasses.Location()
-movementLocal = marvinglobal.cartClasses.Movement()
-sensorTestDataLocal = marvinglobal.cartClasses.SensorTestData()
-floorOffsetLocal = [marvinglobal.cartClasses.FloorOffset() for i in range(mg.NUM_IR_DISTANCE_SENSORS)]
-irSensorReferenceDistanceLocal = [marvinglobal.cartClasses.IrSensorReferenceDistance() for i in range(mg.NUM_IR_DISTANCE_SENSORS)]
-obstacleDistanceLocal = marvinglobal.cartClasses.ObstacleDistance()
-platformImuLocal = marvinglobal.cartClasses.ImuData()
-headImuLocal = marvinglobal.cartClasses.ImuData()
-battery6VLocal = marvinglobal.cartClasses.Battery(5)
-battery12VLocal = marvinglobal.cartClasses.Battery(10)
+stateLocal = cartClasses.State()
+locationLocal = cartClasses.Location()
+movementLocal = cartClasses.Movement()
+sensorTestDataLocal = cartClasses.SensorTestData()
+floorOffsetLocal = [cartClasses.FloorOffset() for i in range(mg.NUM_IR_DISTANCE_SENSORS)]
+irSensorReferenceDistanceLocal = [cartClasses.IrSensorReferenceDistance() for i in range(mg.NUM_IR_DISTANCE_SENSORS)]
+obstacleDistanceLocal = cartClasses.ObstacleDistance()
+platformImuLocal = cartClasses.ImuData()
+headImuLocal = cartClasses.ImuData()
+battery6VLocal = cartClasses.Battery(5)
+battery12VLocal = cartClasses.Battery(10)
 
 simulateArduino = False
 
 # configuration values for cart arduino infrared distance limits
 DISTANCE_UNKNOWN = 999
-FLOOR_MAX_OBSTACLE = 15  # allowed shorter distance in mm from reference value
-FLOOR_MAX_ABYSS = 20     # allowed additional distance in mm from reference value
+FLOOR_MAX_OBSTACLE = 50  # allowed shorter distance in mm from reference value
+FLOOR_MAX_ABYSS = 100     # allowed additional distance in mm from reference value
 NUM_REPEATED_MEASURES = 7
 DELAY_BETWEEN_ANALOG_READS = 20         # value 1 caused unstable analog read values from distance sensor (2.4.2019)
 MIN_SCAN_CYCLE_DURATION = 80            # when moving maintain a minimal delay between sensor reads
@@ -137,10 +137,9 @@ msgThread = None
 navThread = None
 
 
-
 def log(msg, publish=True):
 
-    logtime = str(datetime.datetime.now())[11:21]
+    logtime = str(datetime.datetime.now())[11:23]
     logging.info(f"{logtime} - {msg}")
     print(f"{logtime} - {msg}")
 
@@ -156,8 +155,20 @@ def saveImg(img, frameNr):
         log(f"cartGlobal, saveImg exception {sys.exc_info()[0]}")
 
 
-def getIrSensorName(sensorID):
-    return ["swipeFrontLeft", "swipeFrontCenter", "swipeFrontRight", "swipeBackLeft", "swipeBackCenter", "swipeBackRight", "staticLeftFront", "staticRightFront", "staticLeftBack", "staticRightBack"][sensorID ]
+def getIrSensorName(sensorId):
+    if sensorId < 10:
+        return ["swipeFrontLeft  ",
+                "swipeFrontCenter",
+                "swipeFrontRight ",
+                "swipeBackLeft   ",
+                "swipeBackCenter ",
+                "swipeBackRight  ",
+                "staticLeftFront ",
+                "staticRightFront",
+                "staticLeftBack  ",
+                "staticRightBack "][sensorId]
+    else:
+        return(f"invalid {sensorId=}")
 
 
 def getUsSensorName(sensorID):

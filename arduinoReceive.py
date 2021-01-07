@@ -18,24 +18,22 @@ import cart
 def initSerial(comPort):
 
     config.arduinoConnEstablished = False
-    reconnectionTried = False
 
-    while True:
-        try:
-            config.arduino = serial.Serial(comPort)
+    try:
+        config.arduino = serial.Serial(comPort)
 
-            config.arduino.setDTR(False)
-            time.sleep(0.1)
-            config.arduino.setDTR(True)
-            config.arduino.baudrate = 115200
-            config.arduino.writeTimeout = 0
-            config.log("Serial comm to arduino established")
-            return
+        config.arduino.setDTR(False)    # setting DTR should reset the arduino
+        time.sleep(0.3)
+        config.arduino.setDTR(True)
+        time.sleep(0.3)
+        config.arduino.baudrate = 115200
+        config.arduino.writeTimeout = 0
+        config.log("Serial comm to arduino established")
+        return True
 
-        except Exception as e:
-            config.log(f"could not reconnect COM5, going down")
-            cartControl.endCartControl()
-
+    except Exception as e:
+        config.log(f"could not connect with COM5, going down")
+        return False
 
 #####################################
 # readMessages runs in its own thread
@@ -50,7 +48,7 @@ def readMessages():
         try:
             numBytesAvailable = config.arduino.inWaiting()
         except Exception as e:
-            config.log(f"exception on arduino.inWaiting: {e}")
+            config.log(f"exception in arduinoReceive, readMessages: {e}")
             time.sleep(10)
             os._exit(1)
 
@@ -88,9 +86,11 @@ def readMessages():
 
 
             elif msgID == "!F1":  # floor offsets from infrared sensors
-                # !F1,<sensorID>,<ANZ_MESSUNGEN_PRO_SCAN>,[ANZ_MESSUNGEN_PRO_SCAN<value>,]
-                config.log(f"{recv}", publish=False)
+                # !F1,[<sensorId>,<step>,<obstacleHeight>,<abyssDepth] * numInvolvedSensors
+                config.log(f"{recv=}, FLOOR_OFFSET", publish=False)
                 distanceSensors.updateFloorOffset(recv)
+                if distanceSensors.sensorInTest is not None:
+                    config.share.cartGuiUpdateQueue.put({'msgType': mg.SharedDataItem.FLOOR_OFFSET})
 
 
             elif msgID == "!F2":  # reference distances of infrared sensor stored in arduino eeprom
@@ -107,11 +107,11 @@ def readMessages():
 
             elif msgID == "!F3":  # measured distances of infrared sensor
                 # !F3,<sensorID>,<ANZ_MESSUNGEN_PRO_SCAN>,[ANZ_MESSUNGEN_PRO_SCAN<value>,]
-                config.log(f"irSensor distance: {recv}", publish=False)
+                config.log(f"F3: irSensor distance: {recv}", publish=False)
                 messageItems = [int(e) if e.isdigit() else e for e in recv.split(',')]
 
                 sensorId = messageItems[1]
-                distanceValues = [int(i) for i in messageItems[3:-1]]
+                distanceValues = [int(i) for i in messageItems[3:]]
 
                 config.share.cartGuiUpdateQueue.put(
                 {'msgType': mg.CartGuiUpdateRequest.SENSOR_TEST_DATA, 'sensorId': sensorId, 'distances': distanceValues})
@@ -241,7 +241,7 @@ def readMessages():
 
 
             elif msgID == "!P1": #"!P1":  # cart position update:
-                # !Aa, <currentYaw>, <distance moved in mm>
+                # !P1, <currentYaw>, <distance moved in mm>,
                 items = recv.split(",")
                 yaw = round(float(items[1]))
                 distance = round(float(items[2]))

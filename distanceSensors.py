@@ -60,7 +60,7 @@ usDistanceSensor = [0] * mg.NUM_US_DISTANCE_SENSORS
 def updateFloorOffset(recv):
     """
     cart arduino msg F1 sends floor offsets of involved ir sensors of movement direction
-    # !F1,[<sensorID>,<obstacleheight>,<abyssDepth>]*involvedSensors(max 6)
+    # !F1,[<sensorID>,<step>,<obstacleHeight>,<abyssDepth>] * involvedSensors(max 6)
     """
     msg = [int(e) if e.isdigit() else e for e in recv.split(',')]
 
@@ -84,27 +84,12 @@ def updateFloorOffset(recv):
         config.log(logMsg)
         config.floorOffsetLocal[sensorId].lastUpdate = time.time()
 
-        updStmt:Tuple[mg.SharedDataItem,int,...] = (mg.SharedDataItem.FLOOR_OFFSET, sensorId, step, obstacleHeight, abyssDepth)
-        config.share.updateSharedData(updStmt)
-
-
-
-
-def updateSensorTestData(msg):
-    """
-    cart arduino msg A7 contains measured distance values for each scan step
-    the measured distances are only sent when a sensor test is requested
-    # !F3,<sensorId>,<NUM_SCAN_STEPS>,<distances>]
-    forward the distances to the gui
-    """
-    sensorId:int = msg[1]
-    numValues:int = msg[2]
-    distanceValues = [int(i) for i in msg[3:-1]]
-
-    formattedList = "".join([f"{x:5d}" for x in distanceValues])
-    config.log(f"floor distances, sensor: {config.getIrSensorName(sensorId)} {formattedList}", publish=False)
-
-    config.share.cartGuiUpdateQueue.put({'msgType': mg.SharedDataItem.SENSOR_TEST_DATA, 'sensorId': sensorId, 'distances': distanceValues})
+        # in normal operation keep this local in cartControl as it causes many data updates
+        # running into obstacle/abyss will create its own messages !S1/!S2 to update the gui
+        # only when running a sensor test the gui is updated with each step measure result
+        if sensorInTest is not None:
+            updStmt:Tuple[mg.SharedDataItem,int,...] = (mg.SharedDataItem.FLOOR_OFFSET, sensorId, step, obstacleHeight, abyssDepth)
+            config.share.updateSharedData(updStmt)
 
 
 def updateFreeFrontRoom(messageItems):

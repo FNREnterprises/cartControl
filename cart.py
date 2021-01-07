@@ -9,6 +9,7 @@ import marvinglobal.marvinglobal as mg
 import marvinglobal.cartClasses
 import config
 import arduinoSend
+import distanceSensors
 
 persistedLocation = "cartLocation.json"
 
@@ -100,8 +101,7 @@ def terminateMove(distanceMoved, yaw, reason):
     config.log(f"!S4 cart move stopped, {reason}")
 
     # if sensorTest is active stop it
-    #if distanceSensors.sensorInTest is not None:
-    #    distanceSensors.sensorInTest = None
+    distanceSensors.sensorInTest = None
 
 
 def initiateRotation(relativeAngle, speed=200):

@@ -4,22 +4,14 @@ import time
 import threading
 import numpy as np
 import psutil
-import simplejson as json
 from typing import Tuple
-import logging
-#from rpyc.utils.server import ThreadedServer
-import socket
-from multiprocessing.managers import SyncManager
+import distanceSensors
 from queue import Empty
+import subprocess
 
-import sys
-
-#import cProfile, pstats, io
-#from pstats import SortKey
-
-import marvinglobal.marvinglobal as mg
-import marvinglobal.marvinShares as marvinShares
-import marvinglobal.cartClasses as cartCls
+from marvinglobal import marvinglobal as mg
+from marvinglobal import marvinShares as marvinShares
+from marvinglobal import cartClasses as cartClasses
 
 import config
 import arduinoReceive
@@ -45,8 +37,15 @@ def cartInit(verbose:bool):
     config.stateLocal.cartStatus = mg.CartStatus.CONNECTING
     cart.publishState()
 
-    arduinoReceive.initSerial("COM5")
-
+    if not arduinoReceive.initSerial("COM5"):
+        # try to reset USB once
+        endCartControl()
+        subprocess.run(['c:/pnputil.exe', '/disable-device USB\\VID_2341&PIC_0042* '])
+        subprocess.run(['c:/pnputil.exe', '/enable-device USB\\VID_2341&PIC_0042* '])
+        subprocess.run(['c:/pnputil.exe', '/disable-device USB\\VID_2341&PIC_0042* '])
+        subprocess.run(['c:/pnputil.exe', '/enable-device USB\\VID_2341&PIC_0042* '])
+        if not arduinoReceive.initSerial("COM5"):
+            endCartControl()
 
     # wait for confirmed message exchange with cart arduino
     config.log(f"cart - wait for first message from arduino ...")
@@ -79,7 +78,7 @@ def endCartControl():
     if config.share is not None:
         config.share.removeProcess(config.processName)
         config.stateLocal = mg.CartStatus.DOWN
-        updStmt: Tuple[int, cartCls.State] = (mg.SharedDataItem.CART_STATE, config.stateLocal)
+        updStmt: Tuple[int, cartClasses.State] = (mg.SharedDataItem.CART_STATE, config.stateLocal)
         config.share.updateSharedData(updStmt)
     os._exit(1)
 
@@ -143,8 +142,8 @@ if __name__ == '__main__':
 
 
     # check for cart ready, abort after time limit
-    readyTimeoutWait = time.time() + 5000
-    config.log(f'start waiting for cart ready, {time.time()}, {readyTimeoutWait}')
+    readyTimeoutWait = time.time() + 7
+    config.log(f'start waiting for cart ready, max 5 s')
     while (not config.cartReady) and (time.time() < readyTimeoutWait):
         #config.log(f"not ready yet {time.time()}, {readyTimeoutWait}")
         time.sleep(1)
@@ -198,6 +197,7 @@ if __name__ == '__main__':
             config.log(f"test ir sensor {request['sensorId']}")
             config.sensorTestDataLocal.numMeasures = 0
             config.sensorTestDataLocal.sumMeasures = np.zeros((mg.NUM_SCAN_STEPS), dtype=np.int16)
+            distanceSensors.sensorInTest = request['sensorId']
             arduinoSend.testSensorCommand(request['sensorId'])
 
 
