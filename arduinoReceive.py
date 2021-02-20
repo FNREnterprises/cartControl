@@ -82,7 +82,7 @@ def readMessages():
             elif msgID == "!F0":
                 # send sensor results to cartGui
                 config.log(f"!F0: signal cartgui to update sensor data {recv}")
-                config.share.cartGuiUpdateQueue.put({'msgType': mg.SharedDataItem.FLOOR_OFFSET})
+                config.marvinShares.cartGuiUpdateQueue.put({'msgType': mg.SharedDataItem.FLOOR_OFFSET})
 
 
             elif msgID == "!F1":  # floor offsets from infrared sensors
@@ -90,7 +90,7 @@ def readMessages():
                 config.log(f"{recv=}, FLOOR_OFFSET", publish=False)
                 distanceSensors.updateFloorOffset(recv)
                 if distanceSensors.sensorInTest is not None:
-                    config.share.cartGuiUpdateQueue.put({'msgType': mg.SharedDataItem.FLOOR_OFFSET})
+                    config.marvinShares.cartGuiUpdateQueue.put({'msgType': mg.SharedDataItem.FLOOR_OFFSET})
 
 
             elif msgID == "!F2":  # reference distances of infrared sensor stored in arduino eeprom
@@ -101,8 +101,10 @@ def readMessages():
                 sensorId = int(messageItems[1])
                 distanceValues = [int(i) for i in messageItems[3:-1]]
 
-                updStmt: Tuple[mg.SharedDataItem, int, List[int]] = (mg.SharedDataItem.IR_SENSOR_REFERENCE_DISTANCE, sensorId, distanceValues)
-                config.share.updateSharedData(updStmt)
+                #updStmt: Tuple[mg.SharedDataItem, int, List[int]] = (mg.SharedDataItem.IR_SENSOR_REFERENCE_DISTANCE, sensorId, distanceValues)
+                updStmt = {'cmd': mg.SharedDataItem.IR_SENSOR_REFERENCE_DISTANCE, 'sender': config.processName,
+                           'info': {'sensorId': sensorId, 'distances': distanceValues}}
+                config.marvinShares.updateSharedData(updStmt)
 
 
             elif msgID == "!F3":  # measured distances of infrared sensor
@@ -113,9 +115,11 @@ def readMessages():
                 sensorId = messageItems[1]
                 distanceValues = [int(i) for i in messageItems[3:]]
 
-                config.share.cartGuiUpdateQueue.put(
-                {'msgType': mg.CartGuiUpdateRequest.SENSOR_TEST_DATA, 'sensorId': sensorId, 'distances': distanceValues})
-
+                #config.marvinShares.cartGuiUpdateQueue.put(
+                #{'msgType': mg.CartGuiUpdateRequest.SENSOR_TEST_DATA, 'sensorId': sensorId, 'distances': distanceValues})
+                updStmt = {'cmd': mg.CartGuiUpdateRequest.SENSOR_TEST_DATA, 'sender': config.processName,
+                           'info': {'sensorId': sensorId, 'distances': distanceValues}}
+                config.marvinShares.updateSharedData(updStmt)
 
             elif msgID == "!F4":  # distances from ultrasonic sensors
                 # The sensors see only obstacles, 0 means no echo received or obstacles too far away
@@ -236,8 +240,10 @@ def readMessages():
                 if abs(config.stateLocal.Voltage12V - newVoltage12V) > 500:
                     config.stateLocal.Voltage12V = newVoltage12V
                     config.log(f"!B0, new 12V voltage read [mV]: {newVoltage12V}")
-                    updStmt:Tuple[int,cartCls.State] = (mg.SharedDataItem.CART_STATE, config.stateLocal)
-                    config.share.updateSharedData(updStmt)
+                    #updStmt:Tuple[int,cartCls.State] = (mg.SharedDataItem.CART_STATE, config.stateLocal)
+                    updStmt = {'cmd': mg.SharedDataItem.CART_STATE, 'sender': config.processName,
+                               'info': config.stateLocal}
+                    config.marvinShares.updateSharedData(updStmt)
 
 
             elif msgID == "!P1": #"!P1":  # cart position update:

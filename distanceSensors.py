@@ -88,8 +88,10 @@ def updateFloorOffset(recv):
         # running into obstacle/abyss will create its own messages !S1/!S2 to update the gui
         # only when running a sensor test the gui is updated with each step measure result
         if sensorInTest is not None:
-            updStmt:Tuple[mg.SharedDataItem,int,...] = (mg.SharedDataItem.FLOOR_OFFSET, sensorId, step, obstacleHeight, abyssDepth)
-            config.share.updateSharedData(updStmt)
+            #updStmt:Tuple[mg.SharedDataItem,int,...] = (mg.SharedDataItem.FLOOR_OFFSET, sensorId, step, obstacleHeight, abyssDepth)
+            updStmt = {'cmd': mg.SharedDataItem.FLOOR_OFFSET, 'sender': config.processName,
+                       'info': {'sensorId': sensorId, 'step': step, 'height': obstacleHeight, 'depth': abyssDepth}}
+            config.marvinShares.updateSharedData(updStmt)
 
 
 def updateFreeFrontRoom(messageItems):

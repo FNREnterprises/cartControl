@@ -18,7 +18,7 @@ import arduinoReceive
 import arduinoSend
 
 import findObstacles
-import threadMonitorForwardMove
+#import threadMonitorForwardMove
 #import camImages
 import cart
 
@@ -75,12 +75,13 @@ def cartInit(verbose:bool):
 def endCartControl():
     if config.arduinoConnEstablished:
         config.arduino.close()
-    if config.share is not None:
-        config.share.removeProcess(config.processName)
+    if config.marvinShares is not None:
+        config.marvinShares.removeProcess(config.processName)
         config.stateLocal = mg.CartStatus.DOWN
-        updStmt: Tuple[int, cartClasses.State] = (mg.SharedDataItem.CART_STATE, config.stateLocal)
-        config.share.updateSharedData(updStmt)
-    os._exit(1)
+        #updStmt: Tuple[int, cartClasses.State] = (mg.SharedDataItem.CART_STATE, config.stateLocal)
+        updStmt = {'cmd': mg.SharedDataItem.CART_STATE, 'sender': config.processName, 'info': config.stateLocal}
+        config.marvinShares.updateSharedData(updStmt)
+    os._exit(2)
 
 
 def getRemainingRotation():
@@ -115,30 +116,24 @@ def updateBatteryStatus():
 
 if __name__ == '__main__':
 
+    config.marvinShares:marvinShares.MarvinShares = marvinShares.MarvinShares()  # shared data
 
-    config.share = marvinShares.MarvinShares()
-    if not config.share.sharedDataConnect(config.processName):
+    #config.marvinShares = marvinShares.MarvinShares()
+    if not config.marvinShares.sharedDataConnect(config.processName):
         config.log(f"could not connect with marvinData")
-        os._exit(1)
+        os._exit(3)
 
     # add own process to shared process list
-    config.share.updateProcessDict(config.processName)
+    config.marvinShares.updateProcessDict(config.processName)
 
     config.log("cartControl started")
 
     cartInit(verbose=True)
 
     time.sleep(2)
-    if not 'imageProcessing' in config.share.processDict.keys():
+    if not 'imageProcessing' in config.marvinShares.processDict.keys():
         config.log(f"cart needs a running imageProcessing, currently ignored")
         #endCartControl()
-
-
-    # start forward move monitoring thread
-    config.log(f"start forward move monitoring thread")
-    config.navThread = threading.Thread(target=threadMonitorForwardMove.monitorLoop, args={})
-    config.navThread.setName("threadMonitorForwardMove")
-    #config.navThread.start()
 
 
     # check for cart ready, abort after time limit
@@ -165,9 +160,9 @@ if __name__ == '__main__':
 
         request = None
         try:
-            request = config.share.cartRequestQueue.get(timeout=1)
+            request = config.marvinShares.cartRequestQueue.get(timeout=1)
         except (TimeoutError, Empty):
-            config.share.updateProcessDict(config.processName)
+            config.marvinShares.updateProcessDict(config.processName)
             arduinoSend.sendHeartbeat()
             #config.log(f"send heartbeat to marvinData and Arduino")
             continue
@@ -203,6 +198,10 @@ if __name__ == '__main__':
 
         elif cmd == mg.CartCommand.SET_VERBOSE:
             arduinoSend.setVerbose(request['newState'])
+
+
+        elif cmd == mg.CartCommand.STOP_CART:
+            arduinoSend.sendStopCommand(request['reason'])
 
         else:
             config.log(f"unknown cart request {request=}")

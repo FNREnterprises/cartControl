@@ -9,12 +9,12 @@ sendCommandsToArduino = True   # allow or prevent messages to arduino
 ########################################################################
 ########################################################################
 def sendConfigValues():
-    msg = 'a,' + str(config.FLOOR_MAX_OBSTACLE).zfill(2) + "," \
-          + str(config.FLOOR_MAX_ABYSS).zfill(2) + "," \
-          + str(config.NUM_REPEATED_MEASURES).zfill(2) + "," \
-          + str(config.DELAY_BETWEEN_ANALOG_READS).zfill(2) + "," \
-          + str(config.MIN_SCAN_CYCLE_DURATION).zfill(3) + "," \
-          + str(config.finalDockingMoveDistance).zfill(2)
+    msg = 'a,' + str(config.configurationLocal.floorMaxObstacle).zfill(2) + "," \
+          + str(config.configurationLocal.floorMaxAbyss).zfill(2) + "," \
+          + str(config.configurationLocal.numRepeatedMeasures).zfill(2) + "," \
+          + str(config.configurationLocal.delayBetweenAnalogReads).zfill(2) + "," \
+          + str(config.configurationLocal.minScanCycleDuration).zfill(3) + "," \
+          + str(config.configurationLocal.finalDockingMoveDistance).zfill(2)
     config.arduino.write(bytes(msg + ',\n', 'ascii'))
     config.log(f"configuration part a sent, {msg}")
     time.sleep(0.5)

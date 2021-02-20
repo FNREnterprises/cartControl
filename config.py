@@ -9,14 +9,15 @@ from marvinglobal import marvinShares
 from marvinglobal import cartClasses
 
 processName = 'cartControl'
-share:marvinShares.MarvinShares = None   # shared data
+marvinShares = None
 
+configurationLocal = cartClasses.Configuration()
 stateLocal = cartClasses.State()
 locationLocal = cartClasses.Location()
 movementLocal = cartClasses.Movement()
 sensorTestDataLocal = cartClasses.SensorTestData()
-floorOffsetLocal = [cartClasses.FloorOffset() for i in range(mg.NUM_IR_DISTANCE_SENSORS)]
-irSensorReferenceDistanceLocal = [cartClasses.IrSensorReferenceDistance() for i in range(mg.NUM_IR_DISTANCE_SENSORS)]
+floorOffsetLocal = [cartClasses.FloorOffset() for _ in range(mg.NUM_IR_DISTANCE_SENSORS)]
+irSensorReferenceDistanceLocal = [cartClasses.IrSensorReferenceDistance() for _ in range(mg.NUM_IR_DISTANCE_SENSORS)]
 obstacleDistanceLocal = cartClasses.ObstacleDistance()
 platformImuLocal = cartClasses.ImuData()
 headImuLocal = cartClasses.ImuData()
@@ -27,13 +28,6 @@ simulateArduino = False
 
 # configuration values for cart arduino infrared distance limits
 DISTANCE_UNKNOWN = 999
-FLOOR_MAX_OBSTACLE = 50  # allowed shorter distance in mm from reference value
-FLOOR_MAX_ABYSS = 100     # allowed additional distance in mm from reference value
-NUM_REPEATED_MEASURES = 7
-DELAY_BETWEEN_ANALOG_READS = 20         # value 1 caused unstable analog read values from distance sensor (2.4.2019)
-MIN_SCAN_CYCLE_DURATION = 80            # when moving maintain a minimal delay between sensor reads
-finalDockingMoveDistance = 12           # distance to move forward after seeing activated docking switch
-
 
 # values for arduino to calculate distance mm/s from speed value
 # (values depend on battery level too, see excel sheet for calc)
@@ -82,17 +76,12 @@ distanceMonitoring = False
 # robotControl connection
 robotControlIp = '192.168.0.35'
 robotControlAuthKey = b'marvin'
-servoRequestQueue = None
+skeletonRequestQueue = None
 servoStaticDict = None
 servoCurrentDict = None
 #robotControlConnection = None
 #robotControlConnectionFirstTry = True
 
-# ground watch position of head for depth
-pitchGroundWatchDegrees = -35   # head.neck
-
-# ahead watch position of head for depth
-pitchAheadWatchDegrees = -15   # head.neck
 
 
 # the depth cam image includes the cart front when looking down
@@ -107,25 +96,10 @@ cartFrontSearchRows = 60      # number of rows with expected cart front in groun
 cartFrontRowShift = 0
 cartFrontColShift = 0
 
-cartLength2 = 0.29      # meters, distance from cart center to cart front
-robotWidth = 0.6        # meters
-robotWidth2 = robotWidth/2        # meters
-robotHeight = 1.7       # meters
-robotBaseZ = 0.88       # standard table height (could be dynamic, not fully implemented yet)
-robotNeckZ = 0.63       # neck rotation point above base
-robotNeckY = 0.09       # neck position in relation to cart center
-
-D415_FOV_Horizontal = 69.4  # degrees
-D415_FOV_Vertical = 42.5    # degrees
-D415_Rows = 240
-D415_Rows2 = D415_Rows/2
-D415_Cols = 428
-
 D415_Z = 0.095              # meters, cam position above neck axis
 D415_Y = 0.15               # meters, cam distance in front of neck axis
 D415_MountingPitch = -29    # degrees, cam is mounted with a downward pointing angle
-distOffsetCamFromCartFront = 0.1    # meters
-flagInForwardMove = False
+
 
 cartReady = False
 clientList = []
@@ -168,7 +142,7 @@ def getIrSensorName(sensorId):
                 "staticLeftBack  ",
                 "staticRightBack "][sensorId]
     else:
-        return(f"invalid {sensorId=}")
+        return f"invalid {sensorId=}"
 
 
 def getUsSensorName(sensorID):
