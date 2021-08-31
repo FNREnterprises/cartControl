@@ -49,7 +49,7 @@ This in a separate project and is written in Arduino C++ code. See documentation
     eeprom
     end note
     
-    setup -> cartControl : reference distances ir sensors\n<font color=red><b>!Ac
+    setup -> cartControl : reference distances ir sensors\n<font color=red><b>!F2
         
     cartControl -> marvinData : reference distances ir sensors\n<font color=red><b>IR_SENSOR_REFERENCE_DISTANCE
     
@@ -60,9 +60,8 @@ This in a separate project and is written in Arduino C++ code. See documentation
 
 - reference distances:
   - reference distances of the IR sensors are stored in the eeprom of the arduino.
-  - during setup the reference distances are sent to the cartControl (!Ac)
-    and the cartControl updates the values in the shared dict.
-    currently the reference values in the shared dict are not used by other processes
+  - during setup the reference distances are sent to the cartControl (!F2)
+    and the cartControl updates the values in the shared dict for displaying them in the gui
   - through the cart gui a user can request a IR sensor test.
     The measured distances are sent back to the gui and added up to build an average within the cartGui process.
   - These averages can then be set by user action (button) as the new reference distances for the sensor
@@ -77,7 +76,7 @@ This in a separate project and is written in Arduino C++ code. See documentation
 ````puml
 @startuml
     actor cartGui
-    cartGui -> cartControl : test sensor (sensorId)\n<font color=red><b>mg.cartCommand.TEST_SENSOR
+    cartGui -> cartControl : test sensor (sensorId)\n<font color=red><b>mg.CartCommands.TEST_SENSOR
     cartControl -> cartArduino : test sensor\n<font color=red><b>7,<sensorId>
     loop 5 seconds
         cartArduino -> cartControl : sensor distances\n<font color=blue><b>!A7
@@ -89,7 +88,7 @@ This in a separate project and is written in Arduino C++ code. See documentation
 
 ## Move Cart
 
-Cart movements can be requested through the cart GUI or by any other process using the cartCommandQueue
+Cart movements can be requested through the cart GUI or by any other process using the CartCommandsQueue
 
 ````puml
 @startuml

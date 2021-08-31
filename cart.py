@@ -4,6 +4,7 @@ import time
 from typing import Tuple, List
 import numpy as np
 import simplejson as json
+import pickle
 
 import marvinglobal.marvinglobal as mg
 import marvinglobal.cartClasses
@@ -18,73 +19,74 @@ persistedLocation = "cartLocation.json"
 # other processes in need of cart information get updated by the shareManager
 
 def publishState():
-    #updStmt:Tuple[mg.SharedDataItem,marvinglobal.cartClasses.State] = (mg.SharedDataItem.CART_STATE, config.stateLocal)
-    updStmt = {'cmd': mg.SharedDataItem.CART_STATE, 'sender': config.processName,
+    #updStmt:Tuple[mg.SharedDataItems,marvinglobal.cartClasses.State] = (mg.SharedDataItems.CART_STATE, config.stateLocal)
+    updStmt = {'msgType': mg.SharedDataItems.CART_STATE, 'sender': config.processName,
                'info': config.stateLocal}
     config.marvinShares.updateSharedData(updStmt)
 
 def publishLocation():
-    #updStmt:Tuple[mg.SharedDataItem, marvinglobal.cartClasses.Location] = (mg.SharedDataItem.CART_LOCATION, config.locationLocal)
-    updStmt = {'cmd': mg.SharedDataItem.CART_LOCATION, 'sender': config.processName,
+    #updStmt:Tuple[mg.SharedDataItems, marvinglobal.mg.Location] = (mg.SharedDataItems.CART_LOCATION, config.locationLocal)
+    updStmt = {'msgType': mg.SharedDataItems.CART_LOCATION, 'sender': config.processName,
                'info': config.locationLocal}
     config.marvinShares.updateSharedData(updStmt)
 
 def publishMovement():
-    #updStmt:Tuple[mg.SharedDataItem, marvinglobal.cartClasses.Movement] = (mg.SharedDataItem.CART_MOVEMENT, config.movementLocal)
-    updStmt = {'cmd': mg.SharedDataItem.CART_MOVEMENT, 'sender': config.processName,
+    #updStmt:Tuple[mg.SharedDataItems, marvinglobal.cartClasses.Movement] = (mg.SharedDataItems.CART_MOVEMENT, config.movementLocal)
+    updStmt = {'msgType': mg.SharedDataItems.CART_MOVEMENT, 'sender': config.processName,
                'info': config.movementLocal}
     config.marvinShares.updateSharedData(updStmt)
 
 def publishPlatformImu():
-    #updStmt:Tuple[mg.SharedDataItem,marvinglobal.cartClasses.ImuData] = (mg.SharedDataItem.PLATFORM_IMU, config.platformImuLocal)
-    updStmt = {'cmd': mg.SharedDataItem.PLATFORM_IMU, 'sender': config.processName,
+    #updStmt:Tuple[mg.SharedDataItems,marvinglobal.cartClasses.ImuData] = (mg.SharedDataItems.PLATFORM_IMU, config.platformImuLocal)
+    updStmt = {'msgType': mg.SharedDataItems.PLATFORM_IMU, 'sender': config.processName,
                'info': config.platformImuLocal}
     config.marvinShares.updateSharedData(updStmt)
 
 def publishHeadImu():
-    #updStmt:Tuple[mg.SharedDataItem,marvinglobal.cartClasses.ImuData] = (mg.SharedDataItem.HEAD_IMU, config.headImuLocal)
-    updStmt = {'cmd': mg.SharedDataItem.HEAD_IMU, 'sender': config.processName,
+    #updStmt:Tuple[mg.SharedDataItems,marvinglobal.cartClasses.ImuData] = (mg.SharedDataItems.HEAD_IMU, config.headImuLocal)
+    updStmt = {'msgType': mg.SharedDataItems.HEAD_IMU, 'sender': config.processName,
                'info': config.headImuLocal}
     config.marvinShares.updateSharedData(updStmt)
 
 
 def publishObstacleDistances():
-    #updStmt:Tuple[mg.SharedDataItem,marvinglobal.cartClasses.ObstacleDistance] = (mg.SharedDataItem.OBSTACLE_DISTANCE, config.obstacleDistanceLocal)
-    updStmt = {'cmd': mg.SharedDataItem.OBSTACLE_DISTANCE, 'sender': config.processName,
+    #updStmt:Tuple[mg.SharedDataItems,marvinglobal.cartClasses.ObstacleDistance] = (mg.SharedDataItems.OBSTACLE_DISTANCE, config.obstacleDistanceLocal)
+    updStmt = {'msgType': mg.SharedDataItems.OBSTACLE_DISTANCE, 'sender': config.processName,
                'info': config.obstacleDistanceLocal}
     config.marvinShares.updateSharedData(updStmt)
 
 
 #cartLastPublishTime = time.time()
-#lastLocationSaveTime = time.time()
+#timePersisted = time.time()
 
-def initiateMove(moveDirection, speed, distanceMm, protected=True):
+def initiateMove(moveDirectionEnum:mg.MoveDirection, speed, distanceMm, protected=True):
 
     # a protected FORWARD move includes monitoring of obstacles with the headCam
-    if protected and moveDirection == mg.MoveDirection.FORWARD:
+    if protected and moveDirectionEnum == mg.MoveDirection.FORWARD:
         # check for running image processing
         if "imageProcessing" not in config.marvinShares.processDict.keys():
             config.log(f"protected forward move needs a running image processing")
             return False
 
         # request image processing to monitor move
-        config.marvinShares.imageProcessingQueue.put(mg.ImageProcessingCommand.START_MONITOR_FORWARD_MOVETOR_FORWARD_MOVE)
+        config.marvinShares.imageProcessingRequestQueue.put(mg.ImageProcessingCommands.START_MONITOR_FORWARD_MOVE)
 
-    config.movementLocal.moveDirection = moveDirection
+    config.movementLocal.moveDirectionEnum = moveDirectionEnum
     config.movementLocal.speed = speed
     config.movementLocal.distanceRequested = min(distanceMm, 2500)     # limit distance for single move command
-    config.movementLocal.rotationRequested = 0
+    config.movementLocal.relAngleRequested = 0
     config.movementLocal.protected = protected
     config.movementLocal.startX = config.locationLocal.x
     config.movementLocal.startY = config.locationLocal.y
     config.movementLocal.startYaw = config.locationLocal.yaw
-    config.movementLocal.moveAngle = config.movementLocal.evalMoveAngle(moveDirection)
+    config.movementLocal.moveAngle = config.movementLocal.evalMoveAngle(moveDirectionEnum)
     config.movementLocal.targetX = config.movementLocal.startX + int(distanceMm * np.cos(np.radians(config.movementLocal.moveAngle)))
     config.movementLocal.targetY = config.movementLocal.startY + int(distanceMm * np.sin(np.radians(config.movementLocal.moveAngle)))
     config.movementLocal.targetYaw = config.locationLocal.yaw
     config.movementLocal.moveStartTime = time.time()
     config.movementLocal.maxDuration = int(min(((distanceMm / speed) * 1500) + 1500, 15000))
     config.movementLocal.reasonStopped = "-"
+    config.movementLocal.blockEvent = mg.CartMoveBlockEvents.FREE_PATH
     publishMovement()
 
     config.stateLocal.cartMoving = True
@@ -100,7 +102,7 @@ def terminateMove(distanceMoved, yaw, reason):
 
     # stop move monitoring if it was requested
     if config.movementLocal.protected:
-        config.marvinShares.imageProcessingQueue.put(mg.ImageProcessingCommand.STOP_MONITOR_FORWARD_MOVETOR_FORWARD_MOVE)
+        config.marvinShares.imageProcessingRequestQueue.put(mg.ImageProcessingCommands.STOP_MONITOR_FORWARD_MOVE)
 
     config.stateLocal.cartMoving = False
     config.stateLocal.cartRotating = False
@@ -124,10 +126,10 @@ def terminateMove(distanceMoved, yaw, reason):
 
 def initiateRotation(relativeAngle, speed=200):
 
-    config.movementLocal.moveDirection = mg.MoveDirection.ROTATE_LEFT if relativeAngle > 0 else mg.MoveDirection.ROTATE_RIGHT
+    config.movementLocal.moveDirectionEnum = mg.MoveDirection.ROTATE_LEFT if relativeAngle > 0 else mg.MoveDirection.ROTATE_RIGHT
     config.movementLocal.speed = speed
     config.movementLocal.distanceRequested = 0
-    config.movementLocal.rotationRequested = relativeAngle
+    config.movementLocal.relAngleRequested = relativeAngle
     config.movementLocal.protected = False
 
     config.movementLocal.startX = config.locationLocal.x
@@ -139,6 +141,7 @@ def initiateRotation(relativeAngle, speed=200):
     config.movementLocal.targetYaw = config.locationLocal.yaw + relativeAngle
     config.movementLocal.moveStartTime = time.time()
     config.movementLocal.maxDuration = 2500 + abs(relativeAngle) * 50;
+    config.movementLocal.blockEvent = mg.CartMoveBlockEvents.FREE_PATH
     publishMovement()
 
     config.stateLocal.cartMoving = False
@@ -168,13 +171,13 @@ def updateCartLocation(yaw, distance):
     #config.log(f"!P1, update cart location, yaw: {yaw}, distance: {distance}, move angle: {config.movementLocal.moveAngle}")
     config.locationLocal.x = config.movementLocal.startX + int(config.movementLocal.distanceMoved * np.cos(np.radians(config.movementLocal.moveAngle)))
     config.locationLocal.y = config.movementLocal.startY + int(config.movementLocal.distanceMoved * np.sin(np.radians(config.movementLocal.moveAngle)))
-    #config.marvinShares.updateSharedData((mg.SharedDataItem.CART_LOCATION, config.locationLocal))
+    #config.marvinShares.updateSharedData((mg.SharedDataItems.CART_LOCATION, config.locationLocal))
     publishLocation()
     saveCartLocation()
 
-    config.movementLocal.rotated = config.movementLocal.startYaw - yaw
+    config.movementLocal.angleRotated = config.movementLocal.startYaw - yaw
     config.movementLocal.distanceMoved = distance
-    #config.marvinShares.updateSharedData((mg.SharedDataItem.CART_MOVEMENT, config.movementLocal))
+    #config.marvinShares.updateSharedData((mg.SharedDataItems.CART_MOVEMENT, config.movementLocal))
     publishMovement()
 
 
@@ -184,18 +187,18 @@ def updateCartRotation(yaw):
         return
     config.log(f"!P2, update cart rotation, yaw: {yaw}")
     config.locationLocal.yaw = yaw
-    #config.marvinShares.updateSharedData((mg.SharedDataItem.CART_LOCATION, config.locationLocal))
+    #config.marvinShares.updateSharedData((mg.SharedDataItems.CART_LOCATION, config.locationLocal))
     publishLocation()
     saveCartLocation()
 
     config.movementLocal.rotated = config.movementLocal.startYaw - yaw
-    #config.marvinShares.updateSharedData((mg.SharedDataItem.CART_MOVEMENT, config.movementLocal))
+    #config.marvinShares.updateSharedData((mg.SharedDataItems.CART_MOVEMENT, config.movementLocal))
     publishMovement()
 
 
 def saveCartLocation():
     # avoid too many saves
-    if time.time() - config.locationLocal.lastLocationSaveTime < 2:
+    if time.time() - config.locationLocal.timePersisted < 2:
         return
 
     # Saving the location objects:
@@ -205,7 +208,7 @@ def saveCartLocation():
     filename = persistedLocation
     with open(filename, "w") as write_file:
         json.dump(cartData, write_file)
-    config.locationLocal.lastLocationSaveTime = time.time()
+    config.locationLocal.timePersisted = time.time()
     #config.log(f"cart location saved")
 
 
@@ -218,7 +221,7 @@ def loadCartLocation():
     """
     # Getting back the last saved cart data
     config.log(f"load cart location")
-    config.locationLocal = marvinglobal.cartClasses.Location()
+    config.locationLocal = mg.Location()
     filename = persistedLocation
     if os.path.exists(filename):
         with open(filename, "r") as read_file:

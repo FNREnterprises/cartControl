@@ -50,17 +50,16 @@ def sendMoveCommand():
 
 def sendRotateCommand():
 
-    if config.movementLocal.moveDirection == mg.MoveDirection.ROTATE_LEFT:  # rotate counterclock
-        msg = f"2,{abs(config.movementLocal.rotationRequested):03.0f},{config.movementLocal.speed:03.0f},{config.movementLocal.maxDuration:05.0f}"
+    if config.movementLocal.moveDirectionEnum == mg.MoveDirection.ROTATE_LEFT:  # rotate counterclock
+        msg = f"2,{abs(config.movementLocal.relAngleRequested):03.0f},{config.movementLocal.speed:03.0f},{config.movementLocal.maxDuration:05.0f}"
         config.log(f"Send rotate counterclock {msg}")
 
     else:
-        msg = f"3,{abs(config.movementLocal.rotationRequested):03.0f},{config.movementLocal.speed:03.0f},{config.movementLocal.maxDuration:05.0f}"
+        msg = f"3,{abs(config.movementLocal.relAngleRequested):03.0f},{config.movementLocal.speed:03.0f},{config.movementLocal.maxDuration:05.0f}"
         config.log(f"Send rotate clockwise {msg}")
 
     config.log(f"sendMoveCommand {msg=}")
     config.arduino.write(bytes(msg + ',\n', 'ascii'))
-
 
 
 def sendStopCommand(reason):

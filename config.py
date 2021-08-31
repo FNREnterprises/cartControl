@@ -5,20 +5,28 @@ import sys
 import cv2
 import logging
 from marvinglobal import marvinglobal as mg
-from marvinglobal import marvinShares
+from marvinglobal import marvinShares as ms
 from marvinglobal import cartClasses
 
 processName = 'cartControl'
-marvinShares = None
+marvinShares = ms.MarvinShares()
 
 configurationLocal = cartClasses.Configuration()
 stateLocal = cartClasses.State()
-locationLocal = cartClasses.Location()
+locationLocal = mg.Location()
 movementLocal = cartClasses.Movement()
-sensorTestDataLocal = cartClasses.SensorTestData()
-floorOffsetLocal = [cartClasses.FloorOffset() for _ in range(mg.NUM_IR_DISTANCE_SENSORS)]
-irSensorReferenceDistanceLocal = [cartClasses.IrSensorReferenceDistance() for _ in range(mg.NUM_IR_DISTANCE_SENSORS)]
-obstacleDistanceLocal = cartClasses.ObstacleDistance()
+
+#sensorTestDataLocal = cartClasses.SensorTestData()
+newSensorTest = False
+
+swipingIrSensorsLocal = {} #[cartClasses.IrDistanceSensor] * mg.NUM_SWIPING_IR_DISTANCE_SENSORS
+staticIrSensorsLocal = {}
+usSensorsLocal = {}
+
+#floorOffsetLocal = [cartClasses.FloorOffset() for _ in range(mg.NUM_IR_DISTANCE_SENSORS)]
+#irSensorReferenceDistanceLocal = [cartClasses.IrSensorReferenceDistance() for _ in range(mg.NUM_IR_DISTANCE_SENSORS)]
+
+#obstacleDistanceLocal = cartClasses.ObstacleDistance()
 platformImuLocal = cartClasses.ImuData()
 headImuLocal = cartClasses.ImuData()
 battery6VLocal = cartClasses.Battery(5)
@@ -142,7 +150,7 @@ def getIrSensorName(sensorId):
                 "staticLeftBack  ",
                 "staticRightBack "][sensorId]
     else:
-        return f"invalid {sensorId=}"
+        return f"invalid sensorId {sensorId}"
 
 
 def getUsSensorName(sensorID):

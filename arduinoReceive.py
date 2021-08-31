@@ -15,36 +15,19 @@ import cartControl
 import distanceSensors
 import cart
 
-def initSerial(comPort):
-
-    config.arduinoConnEstablished = False
-
-    try:
-        config.arduino = serial.Serial(comPort)
-
-        config.arduino.setDTR(False)    # setting DTR should reset the arduino
-        time.sleep(0.3)
-        config.arduino.setDTR(True)
-        time.sleep(0.3)
-        config.arduino.baudrate = 115200
-        config.arduino.writeTimeout = 0
-        config.log("Serial comm to arduino established")
-        return True
-
-    except Exception as e:
-        config.log(f"could not connect with COM5, going down")
-        return False
 
 #####################################
 # readMessages runs in its own thread
 #####################################
 def readMessages():
 
-    while config.arduino is None:
+    timeout = time.time() + 5
+    while config.arduino is None and time.time() < timeout:
         time.sleep(0.1)
 
     while config.arduino.is_open:
 
+        numBytesAvailable = 0
         try:
             numBytesAvailable = config.arduino.inWaiting()
         except Exception as e:
@@ -54,7 +37,7 @@ def readMessages():
 
         if numBytesAvailable > 0:
             # cartGlobal.log(f"inWaiting > 0")
-            recvB = config.arduino.readline(120)
+            recvB = config.arduino.readline()
             try:
                 recv = recvB.decode()[:-2]  # without cr/lf
             except Exception as e:
@@ -62,9 +45,13 @@ def readMessages():
                 continue
 
             if not config.arduinoConnEstablished:
-                config.arduinoConnEstablished = True        # first message from arduino received
-                #config.log("initialize cart sensors ...")
-                #arduinoSend.sendConfigValues()
+                config.log(f"message received from arduino: {recv}")
+                if "cartControlArduino" in recv:
+                    config.arduinoConnEstablished = True        # first message from arduino received
+                else:
+                    config.log(f"not connected with cartControlArduino, going down")
+                    os._exit(1)
+
 
             # cartGlobal.log(f"line read {recv}")
             msgID = recvB[0:3].decode()
@@ -80,17 +67,17 @@ def readMessages():
 
 
             elif msgID == "!F0":
-                # send sensor results to cartGui
+                # send request to update cartGui with FLOOR_OFFSET
                 config.log(f"!F0: signal cartgui to update sensor data {recv}")
-                config.marvinShares.cartGuiUpdateQueue.put({'msgType': mg.SharedDataItem.FLOOR_OFFSET})
+                config.marvinShares.cartGuiUpdateQueue.put({'msgType': mg.SharedDataItems.FLOOR_OFFSET})
 
 
-            elif msgID == "!F1":  # floor offsets from infrared sensors
-                # !F1,[<sensorId>,<step>,<obstacleHeight>,<abyssDepth] * numInvolvedSensors
+            elif msgID == "!F1":  # floor offsets from infrared sensors (distance - reference)
+                # !F1,[<irSensorId>,<step>,<obstacleHeight>,<abyssDepth] * numInvolvedSensors
                 config.log(f"{recv=}, FLOOR_OFFSET", publish=False)
                 distanceSensors.updateFloorOffset(recv)
-                if distanceSensors.sensorInTest is not None:
-                    config.marvinShares.cartGuiUpdateQueue.put({'msgType': mg.SharedDataItem.FLOOR_OFFSET})
+                #if distanceSensors.sensorInTest is not None:
+                config.marvinShares.cartGuiUpdateQueue.put({'msgType': mg.SharedDataItems.FLOOR_OFFSET})
 
 
             elif msgID == "!F2":  # reference distances of infrared sensor stored in arduino eeprom
@@ -98,28 +85,27 @@ def readMessages():
                 config.log(f"irSensor reference distance: {recv}", publish=False)
                 messageItems = [int(e) if e.isdigit() else e for e in recv.split(',')]
 
-                sensorId = int(messageItems[1])
+                irSensorId = int(messageItems[1])
                 distanceValues = [int(i) for i in messageItems[3:-1]]
 
-                #updStmt: Tuple[mg.SharedDataItem, int, List[int]] = (mg.SharedDataItem.IR_SENSOR_REFERENCE_DISTANCE, sensorId, distanceValues)
-                updStmt = {'cmd': mg.SharedDataItem.IR_SENSOR_REFERENCE_DISTANCE, 'sender': config.processName,
-                           'info': {'sensorId': sensorId, 'distances': distanceValues}}
+                #updStmt: Tuple[mg.SharedDataItems, int, List[int]] = (mg.SharedDataItems.IR_SENSOR_REFERENCE_DISTANCE, irSensorId, distanceValues)
+                updStmt = {'msgType': mg.SharedDataItems.IR_SENSOR_REFERENCE_DISTANCE, 'sender': config.processName,
+                           'info': {'irSensorId': irSensorId, 'distances': distanceValues}}
                 config.marvinShares.updateSharedData(updStmt)
 
 
-            elif msgID == "!F3":  # measured distances of infrared sensor
+            elif msgID == "!F3":  # measured distances of infrared sensor (independent of reference value)
                 # !F3,<sensorID>,<ANZ_MESSUNGEN_PRO_SCAN>,[ANZ_MESSUNGEN_PRO_SCAN<value>,]
                 config.log(f"F3: irSensor distance: {recv}", publish=False)
                 messageItems = [int(e) if e.isdigit() else e for e in recv.split(',')]
 
-                sensorId = messageItems[1]
+                irSensorId = messageItems[1]
                 distanceValues = [int(i) for i in messageItems[3:]]
 
-                #config.marvinShares.cartGuiUpdateQueue.put(
-                #{'msgType': mg.CartGuiUpdateRequest.SENSOR_TEST_DATA, 'sensorId': sensorId, 'distances': distanceValues})
-                updStmt = {'cmd': mg.CartGuiUpdateRequest.SENSOR_TEST_DATA, 'sender': config.processName,
-                           'info': {'sensorId': sensorId, 'distances': distanceValues}}
+                updStmt = {'msgType': mg.SharedDataItems.SENSOR_TEST_DATA, 'sender': config.processName,
+                           'info': {'irSensorId': irSensorId, 'distances': distanceValues, 'newTest': config.newSensorTest}}
                 config.marvinShares.updateSharedData(updStmt)
+                config.newSensorTest = False
 
             elif msgID == "!F4":  # distances from ultrasonic sensors
                 # The sensors see only obstacles, 0 means no echo received or obstacles too far away
@@ -130,81 +116,83 @@ def readMessages():
 
             elif msgID == "!S0":  # free path after move blocked
                 config.log(f"!S0 free path after blocked move")
-                config.movementLocal.distanceSensorObstacle = 0
-                config.movementLocal.distanceSensorAbyss = 0
-                config.movementLocal.blocked = False
-                config.movementLocal.blockedStartTime = 0
+                config.movementLocal.clearBlocking()
                 cart.publishMovement()
 
 
-            elif msgID == "!S1":  # "obstacle on floor:":
-                # !S1,<height>,<limit>,<sensorId>
+            elif msgID == "!S1":  # obstacle detected by irSensor
+                # !S1,<height>,<limit>,<irSensorId>
                 sensorID = 0
                 try:
                     items = recv.split(",")
                     height = int(items[1])
                     limit= int(items[2])
-                    sensorId = int(items[3])
+                    irSensorId = int(items[3])
 
                 except Exception as e:
                     config.log(f"exception with message: '{recv}', error in message structure {e}")
                     continue
 
-                config.log(f"!S1 obstacle detected by infrared sensor, height: {height} > limit: {limit}, sensor: {config.getIrSensorName(sensorId)}")
-                config.movementLocal.obstacleFromInfraredDistanceSensor = height
-                config.movementLocal.sensorIdObstacle = sensorId
+                config.log(f"!S1 obstacle detected by infrared sensor, height: {height} > limit: {limit}, sensor: {config.getIrSensorName(irSensorId)}")
+                config.movementLocal.obstacleHeightIrSensor = height
+                config.movementLocal.irSensorIdObstacle = irSensorId
 
                 config.movementLocal.blocked = True
                 config.movementLocal.blockedStartTime = time.time()
+                config.movementLocal.blockEvent = mg.CartMoveBlockEvents.CLOSE_RANGE_OBSTACLE
                 config.movementLocal.reasonStopped = "obstacle detected by ir sensor"
 
                 cart.publishMovement()
 
 
-            elif msgID == "!S2":  # "abyss:":
-                # !A2,<farthest distance>,<farthest distance>,<first sensorId with exceeding range>
+            elif msgID == "!S2":  # abyss detected by infrared floor monitoring sensors:
+                # !S2,<deepest depth>,<limit>,<first irSensorId with exceeding range>
                 try:
                     items = recv.split(",")
                     depth = int(items[1])
                     limit = int(items[2])
-                    sensorId = int(items[3])
+                    irSensorId = int(items[3])
 
                 except Exception as e:
                     config.log(f"exception with message: '{recv}', error in message structure {e}")
                     continue
 
-                config.log(f"!S3 abyss detected, measured depth: {depth} > limit: {limit}, sensor: {config.getIrSensorName(sensorId)}")
-                config.movementLocal.abyssFromInfraredDistanceSensor = depth
-                config.movementLocal.sensorIdAbyss = sensorId
+                config.log(f"!S3 abyss detected, measured depth: {depth} > limit: {limit}, sensor: {config.getIrSensorName(irSensorId)}")
+                config.movementLocal.abyssDepthIrSensor = depth
+                config.movementLocal.irSensorIdAbyss = irSensorId
 
                 config.movementLocal.blocked = True
                 config.movementLocal.blockedStartTime = time.time()
+                config.movementLocal.blockEvent = mg.CartMoveBlockEvents.CLOSE_RANGE_ABYSS
                 config.movementLocal.reasonStopped = "abyss detected by ir sensor"
 
                 cart.publishMovement()
 
 
             elif msgID == "!S3":  # obstacle in front (ultrasonic sensors)
-                # !S3,<distance>,<limit>,<sensorId>
+                # !S3,<distance>,<limit>,<irSensorId>
                 sensorID = 0
                 try:
                     items = recv.split(",")
                     distance = int(items[1])
                     limit = int(items[2])
-                    sensorId = int(items[3])
+                    usSensorId = int(items[3])
 
                 except Exception as e:
                     config.log(f"exception with message: '{recv}', error in message structure {e}")
                     continue
 
                 config.log(
-                    f"!S3 obstacle detected by ultrasonic sensor, distance: {distance} > limit: {limit}, sensor: {config.getUsSensorName(sensorId)}")
-                config.movementLocal.obstacleFromInfraredDistanceSensor = distance
-                config.movementLocal.sensorIdObstacle = sensorId
+                    f"!S3 obstacle detected by ultrasonic sensor, distance: {distance} > limit: {limit}, sensor: {config.getUsSensorName(usSensorId)}")
+                config.movementLocal.obstacleDistanceUsSensor = distance
+                config.movementLocal.usSensorIdObstacle = usSensorId
 
-                config.movementLocal.blocked = True
-                config.movementLocal.blockedStartTime = time.time()
-                config.movementLocal.reasonStopped = "obstacle detected by us sensor"
+                # a short range distance needs to stop the cart
+                if distance < 100:
+                    config.movementLocal.blocked = True
+                    config.movementLocal.blockedStartTime = time.time()
+                    config.movementLocal.blockEvent = mg.CartMoveBlockEvents.CLOSE_RANGE_OBSTACLE
+                    config.movementLocal.reasonStopped = "obstacle detected by us sensor"
 
                 cart.publishMovement()
 
@@ -216,7 +204,7 @@ def readMessages():
                 stopReason = items[2]
                 cart.terminateRotation(stopReason)
                 #config.log("<-A " + recv, publish=False)  # stop and reason
-                config.log(f"!S3 cart rotation stopped, {stopReason}")
+                config.log(f"!S4 cart rotation stopped, {stopReason}")
 
 
             elif msgID == "!S5":  # movement stopped
@@ -226,6 +214,7 @@ def readMessages():
                 distanceMoved = int(items[2])
                 stopReason = items[3]
                 cart.terminateMove(distanceMoved, yaw, stopReason)
+                config.log(f"!S5 cart movement stopped, {stopReason}")
 
 
             elif msgID == "!B0":  # 12 V supply, measured value
@@ -240,8 +229,8 @@ def readMessages():
                 if abs(config.stateLocal.Voltage12V - newVoltage12V) > 500:
                     config.stateLocal.Voltage12V = newVoltage12V
                     config.log(f"!B0, new 12V voltage read [mV]: {newVoltage12V}")
-                    #updStmt:Tuple[int,cartCls.State] = (mg.SharedDataItem.CART_STATE, config.stateLocal)
-                    updStmt = {'cmd': mg.SharedDataItem.CART_STATE, 'sender': config.processName,
+                    #updStmt:Tuple[int,cartCls.State] = (mg.SharedDataItems.CART_STATE, config.stateLocal)
+                    updStmt = {'msgType': mg.SharedDataItems.CART_STATE, 'sender': config.processName,
                                'info': config.stateLocal}
                     config.marvinShares.updateSharedData(updStmt)
 

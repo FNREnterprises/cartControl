@@ -1,13 +1,14 @@
 
-import os
+
 import time
-from typing import Tuple
+import numpy as np
+from dataclasses import dataclass
 
 import config
 import marvinglobal.marvinglobal as mg
-import cart
 
 sensorInTest = None
+
 
 irDistanceSensorDefinitions = []
 # front left
@@ -88,9 +89,8 @@ def updateFloorOffset(recv):
         # running into obstacle/abyss will create its own messages !S1/!S2 to update the gui
         # only when running a sensor test the gui is updated with each step measure result
         if sensorInTest is not None:
-            #updStmt:Tuple[mg.SharedDataItem,int,...] = (mg.SharedDataItem.FLOOR_OFFSET, sensorId, step, obstacleHeight, abyssDepth)
-            updStmt = {'cmd': mg.SharedDataItem.FLOOR_OFFSET, 'sender': config.processName,
-                       'info': {'sensorId': sensorId, 'step': step, 'height': obstacleHeight, 'depth': abyssDepth}}
+            updStmt = {'msgType': mg.SharedDataItems.FLOOR_OFFSET, 'sender': config.processName,
+                       'info': {'irSensorId': sensorId, 'step': step, 'height': obstacleHeight, 'depth': abyssDepth}}
             config.marvinShares.updateSharedData(updStmt)
 
 
