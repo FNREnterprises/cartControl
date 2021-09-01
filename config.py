@@ -7,30 +7,28 @@ import logging
 from marvinglobal import marvinglobal as mg
 from marvinglobal import marvinShares as ms
 from marvinglobal import cartClasses
+from marvinglobal import distanceSensorClasses
 
 processName = 'cartControl'
 marvinShares = ms.MarvinShares()
 
-configurationLocal = cartClasses.Configuration()
-stateLocal = cartClasses.State()
-locationLocal = mg.Location()
-movementLocal = cartClasses.Movement()
+configurationMaster = cartClasses.Configuration()
+stateMaster = cartClasses.State()
+locationMaster = mg.Location()
+movementMaster = cartClasses.Movement()
 
-#sensorTestDataLocal = cartClasses.SensorTestData()
-newSensorTest = False
+swipingIrSensorsMaster = {} #[cartClasses.IrDistanceSensor] * mg.NUM_SWIPING_IR_DISTANCE_SENSORS
+staticIrSensorsMaster = {}
+usSensorsMaster = {}
 
-swipingIrSensorsLocal = {} #[cartClasses.IrDistanceSensor] * mg.NUM_SWIPING_IR_DISTANCE_SENSORS
-staticIrSensorsLocal = {}
-usSensorsLocal = {}
+floorOffsetMaster = [distanceSensorClasses.FloorOffset() for _ in range(mg.NUM_IR_DISTANCE_SENSORS)]
+#irSensorReferenceDistanceMaster = [cartClasses.IrSensorReferenceDistance() for _ in range(mg.NUM_IR_DISTANCE_SENSORS)]
 
-#floorOffsetLocal = [cartClasses.FloorOffset() for _ in range(mg.NUM_IR_DISTANCE_SENSORS)]
-#irSensorReferenceDistanceLocal = [cartClasses.IrSensorReferenceDistance() for _ in range(mg.NUM_IR_DISTANCE_SENSORS)]
-
-#obstacleDistanceLocal = cartClasses.ObstacleDistance()
-platformImuLocal = cartClasses.ImuData()
-headImuLocal = cartClasses.ImuData()
-battery6VLocal = cartClasses.Battery(5)
-battery12VLocal = cartClasses.Battery(10)
+#obstacleDistanceMaster = cartClasses.ObstacleDistance()
+platformImuMaster = cartClasses.ImuData()
+headImuMaster = cartClasses.ImuData()
+battery6VMaster = cartClasses.Battery(5)
+battery12VMaster = cartClasses.Battery(10)
 
 simulateArduino = False
 

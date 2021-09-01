@@ -10,7 +10,8 @@ from queue import Empty
 
 from marvinglobal import marvinglobal as mg
 from marvinglobal import marvinShares as marvinShares
-from marvinglobal import cartClasses as cartClasses
+from marvinglobal import cartClasses
+from marvinglobal import distanceSensorClasses
 
 import config
 import arduinoReceive
@@ -98,7 +99,7 @@ def cartInit(verbose:bool):
         for servoTypeName, servoTypeData in servoTypeDefinitions.items():
             servoType = skeletonClasses.ServoType()   # inst of servoTypeData class
             servoType.updateValues(servoTypeData)
-            config.servoTypeDictLocal.update({servoTypeName: servoType})
+            config.servoTypeDictMaster.update({servoTypeName: servoType})
 
             # add servoTypes to shared data
             #updStmt = (mg.SharedDataItems.SERVO_TYPE, servoTypeName, dict(servoType.__dict__))
@@ -107,33 +108,33 @@ def cartInit(verbose:bool):
             config.updateSharedDict(msg)
     """
     # create the distance sensor objects
-    for i, item in enumerate(distanceSensors.swipingIrSensorProperties):
-        swipingIrSensor = distanceSensors.SwipingIrSensor(**item)   # pass dict as parameters
-        config.swipingIrSensorsLocal.update({i: swipingIrSensor})
+    for i, item in enumerate(distanceSensorClasses.swipingIrSensorProperties):
+        swipingIrSensor = distanceSensorClasses.SwipingIrSensor(**item)   # pass dict as parameters
+        config.swipingIrSensorsMaster.update({i: swipingIrSensor})
 
         # populate the shared version of the dict
         msg = {'msgType': mg.SharedDataItems.SWIPING_IR_SENSORS, 'sender': config.processName,
-               'info': {'sensorId': i, 'data': config.swipingIrSensorsLocal[i]}}
+               'info': {'irSensorId': i, 'data': config.swipingIrSensorsMaster[i].__dict__}}
         config.marvinShares.updateSharedData(msg)
 
-    for i, item in enumerate(distanceSensors.staticIrSensorProperties):
+    for i, item in enumerate(distanceSensorClasses.staticIrSensorProperties):
         id = i + mg.NUM_SWIPING_IR_DISTANCE_SENSORS
-        staticIrSensor = distanceSensors.StaticIrSensor(**item)
-        config.staticIrSensorsLocal.update({id: staticIrSensor})
+        staticIrSensor = distanceSensorClasses.StaticIrSensor(**item)
+        config.staticIrSensorsMaster.update({id: staticIrSensor})
 
         # populate the shared version of the dict
         msg = {'msgType': mg.SharedDataItems.STATIC_IR_SENSORS, 'sender': config.processName,
-               'info': {'sensorId': id, 'data': config.staticIrSensorsLocal[id]}}
+               'info': {'irSensorId': id, 'data': config.staticIrSensorsMaster[id].__dict__}}
         config.marvinShares.updateSharedData(msg)
 
-    for i, item in enumerate(distanceSensors.usSensorProperties):
+    for i, item in enumerate(distanceSensorClasses.usSensorProperties):
         id = mg.NUM_SWIPING_IR_DISTANCE_SENSORS + mg.NUM_STATIC_IR_DISTANCE_SENSORS + i
-        usSensor = distanceSensors.UsSensor(**item)     # convert dict to param list
-        config.usSensorsLocal.update({id: usSensor})
+        usSensor = distanceSensorClasses.UsSensor(**item)     # convert dict to param list
+        config.usSensorsMaster.update({id: usSensor})
 
         # populate the shared version of the dict
-        msg = {'msgType': mg.SharedDataItems.ULTRASONIC_SENSOR, 'sender': config.processName,
-               'info': {'sensorId': id, 'data': config.usSensorsLocal[id]}}
+        msg = {'msgType': mg.SharedDataItems.ULTRASONIC_SENSORS, 'sender': config.processName,
+               'info': {'usSensorId': id, 'data': config.usSensorsMaster[id].__dict__}}
         config.marvinShares.updateSharedData(msg)
 
 
@@ -161,15 +162,15 @@ def endCartControl():
         config.arduino.close()
     if config.marvinShares is not None:
         config.marvinShares.removeProcess(config.processName)
-        config.stateLocal = mg.CartStatus.DOWN
-        #updStmt: Tuple[int, cartClasses.State] = (mg.SharedDataItems.CART_STATE, config.stateLocal)
-        updStmt = {'msgType': mg.SharedDataItems.CART_STATE, 'sender': config.processName, 'info': config.stateLocal}
+        config.stateMaster = mg.CartStatus.DOWN
+        #updStmt: Tuple[int, cartClasses.State] = (mg.SharedDataItems.CART_STATE, config.stateMaster)
+        updStmt = {'msgType': mg.SharedDataItems.CART_STATE, 'sender': config.processName, 'info': config.stateMaster}
         config.marvinShares.updateSharedData(updStmt)
     os._exit(2)
 
 
 def getRemainingRotation():
-    d = abs(config.locationLocal.yaw - config.locationLocal.targetYaw) % 360
+    d = abs(config.locationMaster.yaw - config.locationMaster.targetYaw) % 360
     return 360 - d if d > 180 else d
 
 
@@ -260,44 +261,52 @@ if __name__ == '__main__':
 
         config.log(f"new cart request: {request}")
 
-        cmd = request['msgType']
+        msgType = request['msgType']
         if 'sender' not in request:
             config.log(f"cart request from unknown sender, ignore")
             continue
         sender = request['sender']
-        if cmd == mg.CartCommands.MOVE:
+        if msgType == mg.CartCommands.MOVE:
             #{'msgType': CartCommands.MOVE, 'direction': direction, 'speed': speed, 'distance': distance, 'protected': protected}
             cart.initiateMove(request['direction'], request['speed'], request['distance'], request['protected'])
 
-        elif cmd == mg.CartCommands.ROTATE:
+        elif msgType == mg.CartCommands.ROTATE:
             #{'msgType': CartCommands.ROTATE, 'relAngle': , 'speed': speed, 'distance': distance, 'protected': protected})
             cart.initiateRotation(request['relAngle'], request['speed'])
 
-        elif cmd == mg.CartCommands.SET_IR_SENSOR_REFERENCE_DISTANCES:
+        elif msgType == mg.CartCommands.SET_IR_SENSOR_REFERENCE_DISTANCES:
             #{'msgType': CartCommands.SET_IR_SENSOR_REFERENCE_DISTANCES, 'sensorId', 'distances'})
             # TODO: persist the reference distances
-            config.log(f"set ir sensor reference distances {request['sensorId'], request['distances']}")
+            sensorId = request['sensorId']
+            config.log(f"set ir sensor reference distances {sensorId}, {request['distances']}")
             arduinoSend.setIrSensorReferenceDistances(request['sensorId'], request['distances'])
 
             # update shared data with new reference values
-            updStmt = {'msgType': mg.SharedDataItems.IR_SENSOR_REFERENCE_DISTANCE, 'sender': config.processName,
-                   'info': {'irSensorId': request['sensorId'], 'distances': request['distances']}}
-            config.marvinShares.updateSharedData(updStmt)
+            if sensorId < mg.NUM_SWIPING_IR_DISTANCE_SENSORS:
+                config.swipingIrSensorsMaster[sensorId]['referenceDistances'] = request['distances']
+                updStmt = {'msgType': mg.SharedDataItems.SWIPING_IR_SENSORS, 'sender': config.processName,
+                   'info': {'irSensorId': request['sensorId'], 'data': config.swipingIrSensorsMaster[sensorId]}}
+                config.marvinShares.updateSharedData(updStmt)
+
+            if sensorId >= mg.NUM_SWIPING_IR_DISTANCE_SENSORS:
+                config.staticIrSensorsMaster[sensorId]['referenceDistances'] = request['distances']
+                updStmt = {'msgType': mg.SharedDataItems.STATIC_IR_SENSORS, 'sender': config.processName,
+                   'info': {'irSensorId': request['sensorId'], 'data': config.staticIrSensorsMaster[sensorId]}}
+                config.marvinShares.updateSharedData(updStmt)
 
 
-        elif cmd == mg.CartCommands.TEST_IR_SENSOR:
+        elif msgType == mg.CartCommands.TEST_IR_SENSOR:
             #{'msgType': CartCommands.TEST_IR_SENSOR, 'sensorId'})
             config.log(f"test ir sensor {request['sensorId']}")
-            config.newSensorTest = True
             distanceSensors.sensorInTest = request['sensorId']
             arduinoSend.testSensorCommand(request['sensorId'])
 
 
-        elif cmd == mg.CartCommands.SET_VERBOSE:
+        elif msgType == mg.CartCommands.SET_VERBOSE:
             arduinoSend.setVerbose(request['newState'])
 
 
-        elif cmd == mg.CartCommands.STOP_CART:
+        elif msgType == mg.CartCommands.STOP_CART:
             arduinoSend.sendStopCommand(request['reason'])
 
         else:

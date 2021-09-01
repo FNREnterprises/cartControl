@@ -62,7 +62,7 @@ def readMessages():
                 config.log("!A0 received, cart ready")
                 config.log("----------")
                 config.cartReady = True
-                config.stateLocal.cartStatus = mg.CartStatus.READY
+                config.stateMaster.cartStatus = mg.CartStatus.READY
                 cart.publishState()
 
 
@@ -89,9 +89,17 @@ def readMessages():
                 distanceValues = [int(i) for i in messageItems[3:-1]]
 
                 #updStmt: Tuple[mg.SharedDataItems, int, List[int]] = (mg.SharedDataItems.IR_SENSOR_REFERENCE_DISTANCE, irSensorId, distanceValues)
-                updStmt = {'msgType': mg.SharedDataItems.IR_SENSOR_REFERENCE_DISTANCE, 'sender': config.processName,
-                           'info': {'irSensorId': irSensorId, 'distances': distanceValues}}
-                config.marvinShares.updateSharedData(updStmt)
+                if irSensorId < mg.NUM_SWIPING_IR_DISTANCE_SENSORS:
+                    config.swipingIrSensorsMaster[irSensorId].referenceDistances = distanceValues
+                    updStmt = {'msgType': mg.SharedDataItems.SWIPING_IR_SENSORS, 'sender': config.processName,
+                           'info': {'irSensorId': irSensorId, 'data': config.swipingIrSensorsMaster[irSensorId].__dict__}}
+                    config.marvinShares.updateSharedData(updStmt)
+
+                if irSensorId >= mg.NUM_SWIPING_IR_DISTANCE_SENSORS:
+                    config.staticIrSensorsMaster[irSensorId].referenceDistance = distanceValues[0]
+                    updStmt = {'msgType': mg.SharedDataItems.STATIC_IR_SENSORS, 'sender': config.processName,
+                           'info': {'irSensorId': irSensorId, 'data': config.staticIrSensorsMaster[irSensorId].__dict__}}
+                    config.marvinShares.updateSharedData(updStmt)
 
 
             elif msgID == "!F3":  # measured distances of infrared sensor (independent of reference value)
@@ -102,21 +110,41 @@ def readMessages():
                 irSensorId = messageItems[1]
                 distanceValues = [int(i) for i in messageItems[3:]]
 
-                updStmt = {'msgType': mg.SharedDataItems.SENSOR_TEST_DATA, 'sender': config.processName,
-                           'info': {'irSensorId': irSensorId, 'distances': distanceValues, 'newTest': config.newSensorTest}}
-                config.marvinShares.updateSharedData(updStmt)
-                config.newSensorTest = False
+                if irSensorId < mg.NUM_SWIPING_IR_DISTANCE_SENSORS:
+                    config.swipingIrSensorsMaster[irSensorId].measuredDistances = distanceValues
+                    updStmt = {'msgType': mg.SharedDataItems.SWIPING_IR_SENSORS, 'sender': config.processName,
+                           'info': {'irSensorId': irSensorId, 'data': config.swipingIrSensorsMaster[irSensorId].__dict__}}
+                    config.marvinShares.updateSharedData(updStmt)
+
+                if irSensorId >= mg.NUM_SWIPING_IR_DISTANCE_SENSORS:
+                    config.staticIrSensorsMaster[irSensorId].measuredDistance = distanceValues[0]
+                    updStmt = {'msgType': mg.SharedDataItems.STATIC_IR_SENSORS, 'sender': config.processName,
+                           'info': {'irSensorId': irSensorId, 'data': config.staticIrSensorsMaster[irSensorId].__dict__}}
+                    config.marvinShares.updateSharedData(updStmt)
+
 
             elif msgID == "!F4":  # distances from ultrasonic sensors
                 # The sensors see only obstacles, 0 means no echo received or obstacles too far away
                 config.log(f"ultrasonic sensor results: {recv}")
                 messageItems = [int(e) if e.isdigit() else e for e in recv.split(',')]
-                distanceSensors.updateFreeFrontRoom(messageItems)
+
+                """
+                the cart has 4 ultrasonic sensors in the front
+                these sensors can only detect distances to obstacles, so without obstacles we get no distance
+                :param messageItems:
+                :return:
+                """
+                for usSensorId in range(mg.NUM_US_DISTANCE_SENSORS):
+                    config.usSensorsMaster[usSensorId].offsetDistance = messageItems[usSensorId]
+
+                    updStmt = {'msgType': mg.SharedDataItems.ULTRASONIC_SENSORS, 'sender': config.processName,
+                               'info': {'usSensorId': usSensorId, 'data': config.usSensorsMaster[usSensorId].__dict__}}
+                    config.marvinShares.updateSharedData(updStmt)
 
 
             elif msgID == "!S0":  # free path after move blocked
                 config.log(f"!S0 free path after blocked move")
-                config.movementLocal.clearBlocking()
+                config.movementMaster.clearBlocking()
                 cart.publishMovement()
 
 
@@ -134,13 +162,13 @@ def readMessages():
                     continue
 
                 config.log(f"!S1 obstacle detected by infrared sensor, height: {height} > limit: {limit}, sensor: {config.getIrSensorName(irSensorId)}")
-                config.movementLocal.obstacleHeightIrSensor = height
-                config.movementLocal.irSensorIdObstacle = irSensorId
+                config.movementMaster.obstacleHeightIrSensor = height
+                config.movementMaster.irSensorIdObstacle = irSensorId
 
-                config.movementLocal.blocked = True
-                config.movementLocal.blockedStartTime = time.time()
-                config.movementLocal.blockEvent = mg.CartMoveBlockEvents.CLOSE_RANGE_OBSTACLE
-                config.movementLocal.reasonStopped = "obstacle detected by ir sensor"
+                config.movementMaster.blocked = True
+                config.movementMaster.blockedStartTime = time.time()
+                config.movementMaster.blockEvent = mg.CartMoveBlockEvents.CLOSE_RANGE_OBSTACLE
+                config.movementMaster.reasonStopped = "obstacle detected by ir sensor"
 
                 cart.publishMovement()
 
@@ -158,13 +186,13 @@ def readMessages():
                     continue
 
                 config.log(f"!S3 abyss detected, measured depth: {depth} > limit: {limit}, sensor: {config.getIrSensorName(irSensorId)}")
-                config.movementLocal.abyssDepthIrSensor = depth
-                config.movementLocal.irSensorIdAbyss = irSensorId
+                config.movementMaster.abyssDepthIrSensor = depth
+                config.movementMaster.irSensorIdAbyss = irSensorId
 
-                config.movementLocal.blocked = True
-                config.movementLocal.blockedStartTime = time.time()
-                config.movementLocal.blockEvent = mg.CartMoveBlockEvents.CLOSE_RANGE_ABYSS
-                config.movementLocal.reasonStopped = "abyss detected by ir sensor"
+                config.movementMaster.blocked = True
+                config.movementMaster.blockedStartTime = time.time()
+                config.movementMaster.blockEvent = mg.CartMoveBlockEvents.CLOSE_RANGE_ABYSS
+                config.movementMaster.reasonStopped = "abyss detected by ir sensor"
 
                 cart.publishMovement()
 
@@ -184,15 +212,15 @@ def readMessages():
 
                 config.log(
                     f"!S3 obstacle detected by ultrasonic sensor, distance: {distance} > limit: {limit}, sensor: {config.getUsSensorName(usSensorId)}")
-                config.movementLocal.obstacleDistanceUsSensor = distance
-                config.movementLocal.usSensorIdObstacle = usSensorId
+                config.movementMaster.obstacleDistanceUsSensor = distance
+                config.movementMaster.usSensorIdObstacle = usSensorId
 
                 # a short range distance needs to stop the cart
                 if distance < 100:
-                    config.movementLocal.blocked = True
-                    config.movementLocal.blockedStartTime = time.time()
-                    config.movementLocal.blockEvent = mg.CartMoveBlockEvents.CLOSE_RANGE_OBSTACLE
-                    config.movementLocal.reasonStopped = "obstacle detected by us sensor"
+                    config.movementMaster.blocked = True
+                    config.movementMaster.blockedStartTime = time.time()
+                    config.movementMaster.blockEvent = mg.CartMoveBlockEvents.CLOSE_RANGE_OBSTACLE
+                    config.movementMaster.reasonStopped = "obstacle detected by us sensor"
 
                 cart.publishMovement()
 
@@ -226,12 +254,12 @@ def readMessages():
                     config.log("!B0 not able to retrieve voltage value {recv}, {e}")
 
                 # test for significant change in Voltage
-                if abs(config.stateLocal.Voltage12V - newVoltage12V) > 500:
-                    config.stateLocal.Voltage12V = newVoltage12V
+                if abs(config.stateMaster.Voltage12V - newVoltage12V) > 500:
+                    config.stateMaster.Voltage12V = newVoltage12V
                     config.log(f"!B0, new 12V voltage read [mV]: {newVoltage12V}")
-                    #updStmt:Tuple[int,cartCls.State] = (mg.SharedDataItems.CART_STATE, config.stateLocal)
+                    #updStmt:Tuple[int,cartCls.State] = (mg.SharedDataItems.CART_STATE, config.stateMaster)
                     updStmt = {'msgType': mg.SharedDataItems.CART_STATE, 'sender': config.processName,
-                               'info': config.stateLocal}
+                               'info': config.stateMaster}
                     config.marvinShares.updateSharedData(updStmt)
 
 
@@ -256,39 +284,39 @@ def readMessages():
                 # Arduino triggers the relais for loading batteries through the docking contacts
                 # gui update by heartbeat logic
                 config.log("cart docked")
-                config.stateLocal.cartDocked = True
+                config.stateMaster.cartDocked = True
                 cart.publishState()
 
 
             elif msgID == "!D2":  #"!Ae":  # cart undocked
                 # Arduino releases the relais for loading batteries through the docking contacts
                 config.log("cart undocked")
-                config.stateLocal.cartDocked = False
+                config.stateMaster.cartDocked = False
                 cart.publishState()
 
 
             elif msgID == "!I1":  # bno055 platform sensor update:
                 # !Ab,<yaw>,<roll>, <pitch>
                 items = recv.split(",")
-                config.platformImuLocal.yaw = 360 - round(float(items[1]) / 1000.0)
-                config.platformImuLocal.roll = float(items[2]) / 1000.0
-                config.platformImuLocal.pitch = float(items[3]) / 1000.0
-                config.platformImuLocal.updateTime = time.time()
+                config.platformImuMaster.yaw = 360 - round(float(items[1]) / 1000.0)
+                config.platformImuMaster.roll = float(items[2]) / 1000.0
+                config.platformImuMaster.pitch = float(items[3]) / 1000.0
+                config.platformImuMaster.updateTime = time.time()
                 cart.publishPlatformImu()
 
-                config.log(f"!I1, platformImu yaw: {config.platformImuLocal.yaw}, roll: {config.platformImuLocal.roll}, pitch: {config.platformImuLocal.pitch}", publish=False)
-                config.locationLocal.yaw = (config.platformImuLocal.yaw + config.platformImuLocal.yawCorrection) % 360
+                config.log(f"!I1, platformImu yaw: {config.platformImuMaster.yaw}, roll: {config.platformImuMaster.roll}, pitch: {config.platformImuMaster.pitch}", publish=False)
+                config.locationMaster.yaw = (config.platformImuMaster.yaw + config.platformImuMaster.yawCorrection) % 360
                 cart.publishLocation()
 
             elif msgID == "!I2":  # bno055 head sensor update:
                 # !Ab,<milliYaw>,<milliRoll>, <milliPitch>
                 items = recv.split(",")
-                config.headImuLocal.yaw = round(float(items[1]) / 1000.0)
-                config.headImuLocal.roll = float(items[2]) / 1000.0
-                config.headImuLocal.pitch = float(items[3]) / 1000.0
-                config.headImuLocal.updateTime = time.time()
+                config.headImuMaster.yaw = round(float(items[1]) / 1000.0)
+                config.headImuMaster.roll = float(items[2]) / 1000.0
+                config.headImuMaster.pitch = float(items[3]) / 1000.0
+                config.headImuMaster.updateTime = time.time()
                 cart.publishHeadImu()
-                config.log(f"!I2, headImu, yaw: {config.headImuLocal.yaw}, roll: {config.headImuLocal.roll}, pitch: {config.headImuLocal.pitch}", publish=False)
+                config.log(f"!I2, headImu, yaw: {config.headImuMaster.yaw}, roll: {config.headImuMaster.roll}, pitch: {config.headImuMaster.pitch}", publish=False)
 
 
             else:
@@ -300,12 +328,12 @@ def readMessages():
             # cartGlobal.log("msg processed")
 
         # monitor move timeout
-        if config.stateLocal.cartMoving:
-            if time.time() > config.movementLocal.moveStartTime + config.movementLocal.maxDuration:
+        if config.stateMaster.cartMoving:
+            if time.time() > config.movementMaster.moveStartTime + config.movementMaster.maxDuration:
                 arduinoSend.sendStopCommand("timeout in move")
 
         # check for docked and batteries loaded
-        if config.stateLocal.cartDocked:
+        if config.stateMaster.cartDocked:
             # check battery status of laptop
             if time.time() - cartControl.getLastBatteryCheckTime() > 5:
                 cartControl.updateBatteryStatus()

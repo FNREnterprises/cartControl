@@ -9,12 +9,12 @@ sendCommandsToArduino = True   # allow or prevent messages to arduino
 ########################################################################
 ########################################################################
 def sendConfigValues():
-    msg = 'a,' + str(config.configurationLocal.floorMaxObstacle).zfill(2) + "," \
-          + str(config.configurationLocal.floorMaxAbyss).zfill(2) + "," \
-          + str(config.configurationLocal.numRepeatedMeasures).zfill(2) + "," \
-          + str(config.configurationLocal.delayBetweenAnalogReads).zfill(2) + "," \
-          + str(config.configurationLocal.minScanCycleDuration).zfill(3) + "," \
-          + str(config.configurationLocal.finalDockingMoveDistance).zfill(2)
+    msg = 'a,' + str(config.configurationMaster.floorMaxObstacle).zfill(2) + "," \
+          + str(config.configurationMaster.floorMaxAbyss).zfill(2) + "," \
+          + str(config.configurationMaster.numRepeatedMeasures).zfill(2) + "," \
+          + str(config.configurationMaster.delayBetweenAnalogReads).zfill(2) + "," \
+          + str(config.configurationMaster.minScanCycleDuration).zfill(3) + "," \
+          + str(config.configurationMaster.finalDockingMoveDistance).zfill(2)
     config.arduino.write(bytes(msg + ',\n', 'ascii'))
     config.log(f"configuration part a sent, {msg}")
     time.sleep(0.5)
@@ -37,11 +37,11 @@ def sendConfigValues():
 
 def sendMoveCommand():
 
-    flagProtected = 1 if config.movementLocal.protected else 0
-    msg = f"1,{config.movementLocal.moveDirection.value}," \
-          f"{config.movementLocal.speed:03.0f}," \
-          f"{config.movementLocal.distanceRequested:04.0f}," \
-          f"{config.movementLocal.maxDuration:05.0f}," \
+    flagProtected = 1 if config.movementMaster.protected else 0
+    msg = f"1,{config.movementMaster.moveDirection.value}," \
+          f"{config.movementMaster.speed:03.0f}," \
+          f"{config.movementMaster.distanceRequested:04.0f}," \
+          f"{config.movementMaster.maxDuration:05.0f}," \
           f"{flagProtected}"
 
     config.log(f"sendMoveCommand {msg=}")
@@ -50,12 +50,12 @@ def sendMoveCommand():
 
 def sendRotateCommand():
 
-    if config.movementLocal.moveDirectionEnum == mg.MoveDirection.ROTATE_LEFT:  # rotate counterclock
-        msg = f"2,{abs(config.movementLocal.relAngleRequested):03.0f},{config.movementLocal.speed:03.0f},{config.movementLocal.maxDuration:05.0f}"
+    if config.movementMaster.moveDirectionEnum == mg.MoveDirection.ROTATE_LEFT:  # rotate counterclock
+        msg = f"2,{abs(config.movementMaster.relAngleRequested):03.0f},{config.movementMaster.speed:03.0f},{config.movementMaster.maxDuration:05.0f}"
         config.log(f"Send rotate counterclock {msg}")
 
     else:
-        msg = f"3,{abs(config.movementLocal.relAngleRequested):03.0f},{config.movementLocal.speed:03.0f},{config.movementLocal.maxDuration:05.0f}"
+        msg = f"3,{abs(config.movementMaster.relAngleRequested):03.0f},{config.movementMaster.speed:03.0f},{config.movementMaster.maxDuration:05.0f}"
         config.log(f"Send rotate clockwise {msg}")
 
     config.log(f"sendMoveCommand {msg=}")
