@@ -27,11 +27,13 @@ def updateFloorOffset(recv):
         logMsg += f", {step=}"
 
         obstacleHeight = msg[sensor * 4 + 3]
-        config.floorOffsetMaster[sensorId].obstacleHeight[step] = obstacleHeight
+        # TODO, floorOffsetMaster has no obstacleHeight array
+        #config.floorOffsetMaster[sensorId].obstacleHeight[step] = obstacleHeight
         logMsg += f", {obstacleHeight=}"
 
         abyssDepth = msg[sensor * 4 + 4]
-        config.floorOffsetMaster[sensorId].abyssDepth[step] = abyssDepth
+        # TODO, floorOffsetMaster has no abyssDepth array
+        #config.floorOffsetMaster[sensorId].abyssDepth[step] = abyssDepth
         logMsg += f", {abyssDepth=}"
         config.log(logMsg)
         config.floorOffsetMaster[sensorId].lastUpdate = time.time()

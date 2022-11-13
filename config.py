@@ -17,11 +17,15 @@ stateMaster = cartClasses.State()
 locationMaster = mg.Location()
 movementMaster = cartClasses.Movement()
 
-swipingIrSensorsMaster = {} #[cartClasses.IrDistanceSensor] * mg.NUM_SWIPING_IR_DISTANCE_SENSORS
-staticIrSensorsMaster = {}
-usSensorsMaster = {}
+usSensorsMaster = [distanceSensorClasses.UsSensor(i) for i in range(mg.NUM_US_DISTANCE_SENSORS)]
 
-floorOffsetMaster = [distanceSensorClasses.FloorOffset() for _ in range(mg.NUM_IR_DISTANCE_SENSORS)]
+swipingIrSensorsMaster = [distanceSensorClasses.SwipingIrSensor(i) for i in range(mg.NUM_SWIPING_IR_DISTANCE_SENSORS)]
+#IrSensorsMaster = {}  # [cartClasses.IrDistanceSensor] * mg.NUM_SWIPING_IR_DISTANCE_SENSORS
+
+staticIrSensorsMaster = [distanceSensorClasses.StaticIrSensor(i) for i in range(mg.NUM_STATIC_IR_DISTANCE_SENSORS)]
+
+floorOffsetMaster = [distanceSensorClasses.FloorOffset()
+                     for _ in range(mg.NUM_IR_DISTANCE_SENSORS)]
 #irSensorReferenceDistanceMaster = [cartClasses.IrSensorReferenceDistance() for _ in range(mg.NUM_IR_DISTANCE_SENSORS)]
 
 #obstacleDistanceMaster = cartClasses.ObstacleDistance()

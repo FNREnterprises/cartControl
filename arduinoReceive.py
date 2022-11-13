@@ -2,7 +2,7 @@
 import os
 import sys
 import time
-import serial
+import serial           #pyserial
 import subprocess
 from typing import Tuple, List
 import numpy as np
@@ -89,13 +89,15 @@ def readMessages():
                 distanceValues = [int(i) for i in messageItems[3:-1]]
 
                 #updStmt: Tuple[mg.SharedDataItems, int, List[int]] = (mg.SharedDataItems.IR_SENSOR_REFERENCE_DISTANCE, irSensorId, distanceValues)
-                if irSensorId < mg.NUM_SWIPING_IR_DISTANCE_SENSORS:
+                #swiping ir sensors have for each swipe step a distance
+                if irSensorId < mg.NUM_SWIPING_IR_DISTANCE_SENSORS:     # condition for swiping sensor
                     config.swipingIrSensorsMaster[irSensorId].referenceDistances = distanceValues
                     updStmt = {'msgType': mg.SharedDataItems.SWIPING_IR_SENSORS, 'sender': config.processName,
                            'info': {'irSensorId': irSensorId, 'data': config.swipingIrSensorsMaster[irSensorId].__dict__}}
                     config.marvinShares.updateSharedData(updStmt)
 
-                if irSensorId >= mg.NUM_SWIPING_IR_DISTANCE_SENSORS:
+                if irSensorId >= mg.NUM_SWIPING_IR_DISTANCE_SENSORS:       # condition for static ir sensor
+                    irSensorId -= mg.NUM_SWIPING_IR_DISTANCE_SENSORS
                     config.staticIrSensorsMaster[irSensorId].referenceDistance = distanceValues[0]
                     updStmt = {'msgType': mg.SharedDataItems.STATIC_IR_SENSORS, 'sender': config.processName,
                            'info': {'irSensorId': irSensorId, 'data': config.staticIrSensorsMaster[irSensorId].__dict__}}
@@ -110,13 +112,13 @@ def readMessages():
                 irSensorId = messageItems[1]
                 distanceValues = [int(i) for i in messageItems[3:]]
 
-                if irSensorId < mg.NUM_SWIPING_IR_DISTANCE_SENSORS:
+                if irSensorId < mg.NUM_SWIPING_IR_DISTANCE_SENSORS:     # condition for swiping sensors
                     config.swipingIrSensorsMaster[irSensorId].measuredDistances = distanceValues
                     updStmt = {'msgType': mg.SharedDataItems.SWIPING_IR_SENSORS, 'sender': config.processName,
                            'info': {'irSensorId': irSensorId, 'data': config.swipingIrSensorsMaster[irSensorId].__dict__}}
                     config.marvinShares.updateSharedData(updStmt)
 
-                if irSensorId >= mg.NUM_SWIPING_IR_DISTANCE_SENSORS:
+                if irSensorId >= mg.NUM_SWIPING_IR_DISTANCE_SENSORS:    # condition for static sensors
                     config.staticIrSensorsMaster[irSensorId].measuredDistance = distanceValues[0]
                     updStmt = {'msgType': mg.SharedDataItems.STATIC_IR_SENSORS, 'sender': config.processName,
                            'info': {'irSensorId': irSensorId, 'data': config.staticIrSensorsMaster[irSensorId].__dict__}}

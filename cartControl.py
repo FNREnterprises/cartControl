@@ -107,35 +107,26 @@ def cartInit(verbose:bool):
                    'info': {'type': servoTypeName, 'data': dict(servoType.__dict__)}}
             config.updateSharedDict(msg)
     """
+
+    #for i, item in enumerate(distanceSensorClasses.usSensor):
+    for i in range(mg.NUM_US_DISTANCE_SENSORS):
+        updStmt = {'msgType': mg.SharedDataItems.ULTRASONIC_SENSORS, 'sender': config.processName,
+                   'info': {'usSensorId': i, 'data': 0}}
+        config.marvinShares.updateSharedData(updStmt)
+
+
     # create the distance sensor objects
-    for i, item in enumerate(distanceSensorClasses.swipingIrSensorProperties):
-        swipingIrSensor = distanceSensorClasses.SwipingIrSensor(**item)   # pass dict as parameters
-        config.swipingIrSensorsMaster.update({i: swipingIrSensor})
-
+    for i in range(mg.NUM_SWIPING_IR_DISTANCE_SENSORS):
         # populate the shared version of the dict
-        msg = {'msgType': mg.SharedDataItems.SWIPING_IR_SENSORS, 'sender': config.processName,
-               'info': {'irSensorId': i, 'data': config.swipingIrSensorsMaster[i].__dict__}}
-        config.marvinShares.updateSharedData(msg)
+        updStmt = {'msgType': mg.SharedDataItems.SWIPING_IR_SENSORS, 'sender': config.processName,
+                   'info': {'irSensorId': i, 'data': config.swipingIrSensorsMaster[i].__dict__}}
+        config.marvinShares.updateSharedData(updStmt)
 
-    for i, item in enumerate(distanceSensorClasses.staticIrSensorProperties):
-        id = i + mg.NUM_SWIPING_IR_DISTANCE_SENSORS
-        staticIrSensor = distanceSensorClasses.StaticIrSensor(**item)
-        config.staticIrSensorsMaster.update({id: staticIrSensor})
-
+    for i in range(mg.NUM_STATIC_IR_DISTANCE_SENSORS):
         # populate the shared version of the dict
-        msg = {'msgType': mg.SharedDataItems.STATIC_IR_SENSORS, 'sender': config.processName,
-               'info': {'irSensorId': id, 'data': config.staticIrSensorsMaster[id].__dict__}}
-        config.marvinShares.updateSharedData(msg)
-
-    for i, item in enumerate(distanceSensorClasses.usSensorProperties):
-        id = mg.NUM_SWIPING_IR_DISTANCE_SENSORS + mg.NUM_STATIC_IR_DISTANCE_SENSORS + i
-        usSensor = distanceSensorClasses.UsSensor(**item)     # convert dict to param list
-        config.usSensorsMaster.update({id: usSensor})
-
-        # populate the shared version of the dict
-        msg = {'msgType': mg.SharedDataItems.ULTRASONIC_SENSORS, 'sender': config.processName,
-               'info': {'usSensorId': id, 'data': config.usSensorsMaster[id].__dict__}}
-        config.marvinShares.updateSharedData(msg)
+        updStmt = {'msgType': mg.SharedDataItems.STATIC_IR_SENSORS, 'sender': config.processName,
+                   'info': {'irSensorId': i, 'data': config.staticIrSensorsMaster[i].__dict__}}
+        config.marvinShares.updateSharedData(updStmt)
 
 
     # start message receiving thread on verified port
@@ -201,7 +192,7 @@ def updateBatteryStatus():
 
 if __name__ == '__main__':
 
-    #config.marvinShares = marvinShares.MarvinShares()  # shared data
+    config.marvinShares = marvinShares.MarvinShares()  # shared data
 
     config.log(f"{config.processName},  trying to connect with marvinData")
     if not config.marvinShares.sharedDataConnect(config.processName):
