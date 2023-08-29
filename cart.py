@@ -101,6 +101,7 @@ def initiateMove(moveDirectionEnum:mg.MoveDirection, speed, distanceMm, protecte
 def terminateMove(distanceMoved, yaw, reason):
 
     # stop move monitoring if it was requested
+    # dumy comment to test git hub updates to fnrenterprise fork project
     if config.movementMaster.protected:
         config.marvinShares.imageProcessingRequestQueue.put(mg.ImageProcessingCommands.STOP_MONITOR_FORWARD_MOVE)
 
